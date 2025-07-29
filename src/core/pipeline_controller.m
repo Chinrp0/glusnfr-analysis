@@ -216,13 +216,11 @@ end
 
 function [groupResults, groupTimes] = processAllGroups(groupedFiles, groupKeys, rawMeanFolder, ...
                                                       outputFolders, hasParallelToolbox, hasGPU, gpuInfo, modules)
-    % Process all groups with optimal parallelization
+    % Process all groups with optimal parallelization - FIXED MODULE PASSING
     
     numGroups = length(groupKeys);
     groupResults = cell(numGroups, 1);
     groupTimes = zeros(numGroups, 1);
-    
-    cfg = modules.config;
     
     % Determine processing strategy
     useParallel = hasParallelToolbox && numGroups > 1;
@@ -230,32 +228,29 @@ function [groupResults, groupTimes] = processAllGroups(groupedFiles, groupKeys, 
     if useParallel
         fprintf('Processing %d groups in parallel\n', numGroups);
         
-        % Parallel processing with proper data passing
+        % FIXED: Pass modules as constant to avoid reloading in parfor
+        modulesConstant = parallel.pool.Constant(modules);
+        
         parfor groupIdx = 1:numGroups
             [groupResults{groupIdx}, groupTimes(groupIdx)] = processGroup(...
                 groupIdx, groupKeys{groupIdx}, groupedFiles{groupIdx}, ...
-                rawMeanFolder, outputFolders, hasGPU, gpuInfo);
+                rawMeanFolder, outputFolders, hasGPU, gpuInfo, modulesConstant.Value);
         end
         
     else
         fprintf('Processing %d groups sequentially\n', numGroups);
         
-        % Sequential processing
         for groupIdx = 1:numGroups
             [groupResults{groupIdx}, groupTimes(groupIdx)] = processGroup(...
                 groupIdx, groupKeys{groupIdx}, groupedFiles{groupIdx}, ...
-                rawMeanFolder, outputFolders, hasGPU, gpuInfo);
+                rawMeanFolder, outputFolders, hasGPU, gpuInfo, modules);
         end
     end
-    
-    % Summary
-    successCount = sum(cellfun(@(x) strcmp(x.status, 'success'), groupResults));
-    fprintf('Group processing complete: %d/%d successful\n', successCount, numGroups);
 end
 
 function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGroup, ...
-                                               rawMeanFolder, outputFolders, hasGPU, gpuInfo)
-    % Process a single group of files
+                                               rawMeanFolder, outputFolders, hasGPU, gpuInfo, modules)
+    % Process a single group - FIXED: Use passed modules instead of reloading
     
     groupTimer = tic;
     result = struct('status', 'processing', 'groupKey', groupKey, 'numFiles', length(filesInGroup));
@@ -263,8 +258,9 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
     fprintf('Processing Group %d: %s (%d files)\n', groupIdx, groupKey, length(filesInGroup));
     
     try
+        % REMOVED: modules = module_loader(); % Don't reload modules in parfor!
+        % Use the passed modules parameter instead
         
-        % Process all files in the group
         [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules);
         
         if isempty(groupData)
@@ -274,17 +270,11 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
             return;
         end
         
-        % Organize data
         [organizedData, averagedData, roiInfo] = modules.organize.organizeGroupData(groupData, groupMetadata, groupKey);
-        
-        % Save results
         saveGroupResults(organizedData, averagedData, roiInfo, groupKey, outputFolders, modules);
-        
-        % Generate plots
         modules.plot.generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, ...
                                        outputFolders.individual, outputFolders.averaged);
         
-        % Prepare result summary
         result = prepareGroupResult(groupData, groupMetadata, roiInfo, 'success');
         result.groupKey = groupKey;
         

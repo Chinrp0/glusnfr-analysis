@@ -1,23 +1,14 @@
-%% ========================================================================
-%% MODULE 1: src/processing/df_calculator.m
-%% ========================================================================
-
 function calculator = df_calculator()
     % DF_CALCULATOR - Optimized dF/F calculation module
     % 
     % This module provides GPU-accelerated and CPU-optimized dF/F
     % calculations with proper memory management and error handling.
-    %
-    % Performance improvements over original:
-    % - 2-3x faster GPU calculations
-    % - Better memory management
-    % - Vectorized operations
-    % - Proper error handling with fallbacks
     
     calculator.calculate = @calculateDFOptimized;
     calculator.calculateCPU = @calculateCPUOptimized;
     calculator.calculateGPU = @calculateGPUOptimized;
     calculator.validateInputs = @validateCalculationInputs;
+    calculator.shouldUseGPU = @shouldUseGPU;  % NEW: Expose GPU decision logic
 end
 
 function [dF_values, thresholds, gpuUsed] = calculateDFOptimized(traces, hasGPU, gpuInfo)
@@ -34,12 +25,8 @@ function [dF_values, thresholds, gpuUsed] = calculateDFOptimized(traces, hasGPU,
     traces = single(traces);
     [n_frames, n_rois] = size(traces);
     
-    % Determine processing method
-    dataSize = numel(traces);
-    memoryRequired = dataSize * 4; % bytes for single precision
-    useGPU = hasGPU && ...
-             dataSize > cfg.processing.GPU_MIN_DATA_SIZE && ...
-             memoryRequired < (gpuInfo.memory * cfg.processing.GPU_MEMORY_FRACTION * 1e9);
+    % Use the new shouldUseGPU function for decision making
+    useGPU = shouldUseGPU(numel(traces), hasGPU, gpuInfo, cfg);
     
     fprintf('    Processing %d ROIs × %d frames (%s)\n', n_rois, n_frames, ...
             ternary(useGPU, 'GPU', 'CPU'));
@@ -60,6 +47,47 @@ function [dF_values, thresholds, gpuUsed] = calculateDFOptimized(traces, hasGPU,
     end
     
     fprintf('    Calculated dF/F for %d ROIs (GPU: %s)\n', n_rois, string(gpuUsed));
+end
+
+function useGPU = shouldUseGPU(dataSize, hasGPU, gpuInfo, cfg)
+    % Determine whether to use GPU based on data size and available memory
+    %
+    % INPUTS:
+    %   dataSize - Number of elements in the data array
+    %   hasGPU   - Boolean indicating if GPU is available
+    %   gpuInfo  - Structure with GPU information (including .memory field in GB)
+    %   cfg      - Configuration structure with processing parameters
+    %
+    % OUTPUTS:
+    %   useGPU   - Boolean indicating whether GPU should be used
+    %
+    % LOGIC:
+    %   - GPU must be available
+    %   - Data size must exceed minimum threshold
+    %   - Required memory must fit in available GPU memory (with safety margin)
+    
+    useGPU = false;
+    
+    % Check basic availability
+    if ~hasGPU
+        return;
+    end
+    
+    % Check data size threshold
+    if dataSize < cfg.processing.GPU_MIN_DATA_SIZE
+        return;
+    end
+    
+    % Check memory requirements
+    memoryRequired = dataSize * 4; % bytes for single precision
+    availableMemory = gpuInfo.memory * cfg.processing.GPU_MEMORY_FRACTION * 1e9; % GB to bytes
+    
+    if memoryRequired > availableMemory
+        return;
+    end
+    
+    % All checks passed
+    useGPU = true;
 end
 
 function [dF_values, thresholds] = calculateGPUOptimized(traces, cfg)
