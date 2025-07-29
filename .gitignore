@@ -1,0 +1,56 @@
+# MATLAB temporary files
+*.asv
+*.autosave
+
+# MATLAB workspace files
+*.mat
+
+# MATLAB code generation
+codegen/
+
+# Simulink files
+*.slxc
+*.mdl.autosave
+*.slx.autosave
+*.slxc.autosave
+
+# Simulink cache files
+slprj/
+
+# MEX-files
+*.mex*
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Log files
+*.log
+
+# Temporary folders
+temp/
+tmp/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Visual Studio Code
+.vscode/
+
+# Large data files (you may want these in your case)
+*.xlsx
+*.xls
+*.csv
+# Remove above lines if you want to track Excel files
+
+# Output folders (comment out if you want to track outputs)
+*_plots*/
+*_processed*/
