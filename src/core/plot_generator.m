@@ -633,3 +633,105 @@ function threshold = getPPFROIThreshold(varName, roiInfo)
         threshold = NaN;
     end
 end
+
+function writeTableWithHeaders(dataTable, filepath, sheetName, io, roiInfo, isTrialData)
+    % Write table with appropriate headers based on experiment type
+    
+    if width(dataTable) <= 1 % Only Frame column
+        return;
+    end
+    
+    if strcmp(roiInfo.experimentType, 'PPF')
+        [row1, row2] = createPPFHeaders(dataTable, roiInfo, isTrialData);
+    else
+        [row1, row2] = create1APHeaders(dataTable, roiInfo, isTrialData);
+    end
+    
+    io.writeExcelWithHeaders(dataTable, filepath, sheetName, row1, row2);
+end
+
+function [row1, row2] = createPPFHeaders(dataTable, roiInfo, isTrialData)
+    % Create headers for PPF data
+    
+    varNames = dataTable.Properties.VariableNames;
+    row1 = cell(1, length(varNames));
+    row2 = cell(1, length(varNames));
+    
+    % First column
+    row1{1} = sprintf('%dms', roiInfo.timepoint);
+    row2{1} = 'Time (ms)';
+    
+    % Process other columns
+    for i = 2:length(varNames)
+        varName = varNames{i};
+        
+        if isTrialData
+            % Format: Cs1-c2_ROI3
+            roiMatch = regexp(varName, '(Cs\d+-c\d+)_ROI(\d+)', 'tokens');
+            if ~isempty(roiMatch)
+                row1{i} = roiMatch{1}{1};  % Cs1-c2
+                row2{i} = sprintf('ROI %s', roiMatch{1}{2});  % ROI 3
+            end
+        else
+            % Format: Cs1-c2_n24
+            roiMatch = regexp(varName, '(Cs\d+-c\d+)_n(\d+)', 'tokens');
+            if ~isempty(roiMatch)
+                row1{i} = roiMatch{1}{2};  % 24
+                row2{i} = roiMatch{1}{1};  % Cs1-c2
+            end
+        end
+    end
+end
+
+function [row1, row2] = create1APHeaders(dataTable, roiInfo, isTrialData)
+    % Create headers for 1AP data
+    
+    varNames = dataTable.Properties.VariableNames;
+    row1 = cell(1, length(varNames));
+    row2 = cell(1, length(varNames));
+    
+    % First column
+    if isTrialData
+        row1{1} = 'Trial';
+        row2{1} = 'Time (ms)';
+    else
+        row1{1} = 'n';
+        row2{1} = 'Time (ms)';
+    end
+    
+    % Process other columns
+    for i = 2:length(varNames)
+        varName = varNames{i};
+        
+        if isTrialData
+            % Format: ROI123_T5
+            roiMatch = regexp(varName, 'ROI(\d+)_T(\d+)', 'tokens');
+            if ~isempty(roiMatch)
+                row1{i} = roiMatch{1}{2};  % Trial number
+                row2{i} = sprintf('ROI %s', roiMatch{1}{1});  % ROI number
+            end
+        else
+            % Format: ROI123_n5 or Low_Noise_n15
+            if contains(varName, 'ROI')
+                roiMatch = regexp(varName, 'ROI(\d+)_n(\d+)', 'tokens');
+                if ~isempty(roiMatch)
+                    row1{i} = roiMatch{1}{2};  % n count
+                    row2{i} = sprintf('ROI %s', roiMatch{1}{1});  % ROI number
+                end
+            else
+                % Total averages
+                nMatch = regexp(varName, 'n(\d+)', 'tokens');
+                if ~isempty(nMatch)
+                    row1{i} = nMatch{1}{1};  % n count
+                    if contains(varName, 'Low_Noise')
+                        row2{i} = 'Low Noise';
+                    elseif contains(varName, 'High_Noise')
+                        row2{i} = 'High Noise';
+                    else
+                        row2{i} = 'All';
+                    end
+                end
+            end
+        end
+    end
+end

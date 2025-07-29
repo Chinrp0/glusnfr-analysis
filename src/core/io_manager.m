@@ -239,20 +239,25 @@ function excelFiles = getExcelFilesValidated(folder)
         return;
     end
     
-    % Validate each file (optional - can be slow for many files)
-    validFiles = [];
-    for i = 1:length(allFiles)
-        filepath = fullfile(allFiles(i).folder, allFiles(i).name);
-        if validateExcelFile(filepath)
-            validFiles = [validFiles; allFiles(i)];
-        else
-            fprintf('    Skipping invalid file: %s\n', allFiles(i).name);
-        end
-    end
+    % % Validate each file (optional - can be slow for many files)
+    % validFiles = [];
+    % for i = 1:length(allFiles)
+    %     filepath = fullfile(allFiles(i).folder, allFiles(i).name);
+    %     if validateExcelFile(filepath)
+    %         validFiles = [validFiles; allFiles(i)];
+    %     else
+    %         fprintf('    Skipping invalid file: %s\n', allFiles(i).name);
+    %     end
+    % end
     
     excelFiles = validFiles;
     fprintf('Found %d valid Excel files (out of %d total)\n', ...
             length(excelFiles), length(allFiles));
+end
+
+function excelFiles = getExcelFiles(folder)
+    % Wrapper function for backward compatibility
+    excelFiles = getExcelFilesValidated(folder);
 end
 
 function saveLogToFile(logBuffer, logFileName)

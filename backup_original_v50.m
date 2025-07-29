@@ -6,6 +6,20 @@
 %   Add complete average per genotype & condition
 
 
+%% INTEGRATION WITH NEW MODULAR FUNCTIONS
+% Add all project modules to path
+projectRoot = fileparts(mfilename('fullpath'));
+addpath(genpath(projectRoot));
+
+% Load configuration and modules
+cfg = GluSnFRConfig();
+utils = string_utils();
+calc = df_calculator();
+filter = roi_filter();
+memMgr = memory_manager();
+
+fprintf('Loaded modular functions (v%s)\n', cfg.version);
+
 %% Initialize and validate system capabilities with  configuration
 scriptName = 's6_SnFR_mean_dF_filter_group_plot_v50.m';
 fprintf('=== OPTIMIZED dF/F GROUPED ANALYSIS v50 (1AP and PPF!) ===\n');
@@ -303,7 +317,7 @@ function [groupedFiles, groupKeys] = organizeFilesByGroup(excelFiles, rawMeanFol
     for i = 1:numFiles
         try
             filename = excelFiles(i).name;
-            groupKey = extractGroupKey(filename);
+            groupKey = utils.extractGroupKey(filename);
             
             if ~isempty(groupKey)
                 if isKey(groupMap, groupKey)
@@ -558,25 +572,20 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     timeData_ms = single((0:(size(numericData, 1)-1))' * 5); % Convert to time (ms): 5ms per frame
     
     % OPTIMIZED dF/F calculations with INDIVIDUAL thresholds 
-    [dF_values, thresholds, gpuUsed] = calculate_dF_F(numericData, hasGPU, gpuInfo);
+    [dF_values, thresholds, gpuUsed] = calc.calculate(numericData, hasGPU, gpuInfo);
     
     % APPLY FILTERING - keep only ROIs that pass individual thresholds
     % Determine if this is PPF data and use appropriate filtering
     isPPF = contains(fileInfo.name, 'PPF');
     
     if isPPF
-        % Extract timepoint for PPF filtering
-        ppfMatch = regexp(fileInfo.name, 'PPF-(\d+)ms', 'tokens');
-        if ~isempty(ppfMatch)
-            timepoint_ms = str2double(ppfMatch{1}{1});
-            [finalDFValues, finalHeaders, finalThresholds] = filterValidROIsAdaptive(dF_values, validHeaders, thresholds, 'PPF', timepoint_ms);
-        else
-            [finalDFValues, finalHeaders, finalThresholds] = filterValidROIsAdaptive(dF_values, validHeaders, thresholds);
-        end
+        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
+            filter.filterROIs(dF_values, validHeaders, thresholds, 'PPF', timepoint_ms);
     else
-        % Standard 1AP filtering
-        [finalDFValues, finalHeaders, finalThresholds] = filterValidROIsAdaptive(dF_values, validHeaders, thresholds);
+        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
+            filter.filterROIs(dF_values, validHeaders, thresholds, '1AP');
     end
+    fprintf('    %s\n', filterStats.summary);
     
     % Prepare output structures with single precision
     data = struct();
@@ -584,7 +593,7 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     data.dF_values = finalDFValues;
     data.roiNames = finalHeaders;
     data.thresholds = finalThresholds;
-    data.stimulusTime_ms = 1335; % 267 frames × 5ms = 1335ms
+    data.stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS; % 267 frames × 5ms = 1335ms
     data.gpuUsed = gpuUsed;
     
     metadata = struct();
@@ -683,7 +692,7 @@ function [dF_values, thresholds, gpuUsed] = calculate_dF_F(traces, hasGPU, gpuIn
     % Renamed from calculate_dF_F
     % (Function content remains the same - just renamed)
     
-    baseline_window = 1:250;  % 250 frames = 1250ms baseline
+    baseline_window = cfg.timing.BASELINE_FRAMES;
     [n_frames, n_rois] = size(traces);
     gpuUsed = false;
     
@@ -2345,7 +2354,7 @@ function generateTotalAveragePlots1AP(totalAveragedData, roiInfo, groupKey, plot
     
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
     timeData_ms = totalAveragedData.Frame;
-    stimulusTime_ms = 1335;
+    stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS;
     
     % Get column names (skip Frame)
     varNames = totalAveragedData.Properties.VariableNames(2:end);
@@ -2591,7 +2600,7 @@ function generateGroupPlots1AP(organizedData, averagedData, roiInfo, groupKey, p
     
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
     timeData_ms = organizedData.Frame;
-    stimulusTime_ms = 1335;
+    stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS;
     
     %  color schemes for trials (consistent mapping)
     trialColors = [
