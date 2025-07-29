@@ -35,7 +35,7 @@ function runMainPipeline()
         
         % Step 1: System setup and capability detection
         fprintf('\n--- STEP 1: System Setup ---\n');
-        [hasParallelToolbox, hasGPU, gpuInfo, poolObj] = setupSystemCapabilities(modules.config);
+        [hasParallel, hasGPU, gpuInfo, poolObj] = setupSystemCapabilities(modules.config);
         logBuffer = [logBuffer, logSystemInfo(hasParallelToolbox, hasGPU, gpuInfo)];
         
         % Step 2: File selection and validation
@@ -263,8 +263,6 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
     fprintf('Processing Group %d: %s (%d files)\n', groupIdx, groupKey, length(filesInGroup));
     
     try
-        % Load modules (required for parfor)
-        modules = module_loader();
         
         % Process all files in the group
         [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules);

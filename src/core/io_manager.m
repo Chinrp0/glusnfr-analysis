@@ -117,60 +117,6 @@ function numericData = convertToNumeric(dataRows)
     end
 end
 
-function writeExcelWithCustomHeaders(data, filepath, sheetName, row1Headers, row2Headers)
-    % Write Excel file with custom two-row headers
-    
-    if nargin < 5
-        row2Headers = row1Headers;
-        row1Headers = {};
-    end
-    
-    try
-        % Get variable names if data is a table
-        if istable(data)
-            if isempty(row1Headers)
-                row1Headers = cell(1, width(data));
-                row2Headers = data.Properties.VariableNames;
-            end
-            dataMatrix = table2array(data);
-        else
-            dataMatrix = data;
-        end
-        
-        [numRows, numCols] = size(dataMatrix);
-        
-        % Create cell array for writing
-        if ~isempty(row1Headers) && length(row1Headers) == numCols
-            cellData = cell(numRows + 2, numCols);
-            cellData(1, :) = row1Headers;
-            cellData(2, :) = row2Headers;
-            
-            % Add data
-            for i = 1:numRows
-                for j = 1:numCols
-                    cellData{i+2, j} = dataMatrix(i, j);
-                end
-            end
-            
-            % Write to Excel
-            writecell(cellData, filepath, 'Sheet', sheetName);
-            
-        else
-            % Fallback to standard table writing
-            if istable(data)
-                writetable(data, filepath, 'Sheet', sheetName, 'WriteVariableNames', true);
-            else
-                writematrix(dataMatrix, filepath, 'Sheet', sheetName);
-            end
-        end
-        
-        fprintf('    Written sheet "%s" to %s\n', sheetName, filepath);
-        
-    catch ME
-        warning('Failed to write Excel file %s: %s', filepath, ME.message);
-        rethrow(ME);
-    end
-end
 
 function createDirectoriesIfNeeded(directories)
     % Create directories if they don't exist
