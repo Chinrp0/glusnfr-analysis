@@ -13,7 +13,10 @@ function controller = pipeline_controller()
     controller.processAllGroups = @processAllGroups;
     controller.saveAllResults = @saveAllResults;
     controller.generateAllPlots = @generateAllPlots;
+    controller.detectSystemCapabilities = @detectSystemCapabilities; 
 end
+
+
 
 function runMainPipeline()
     % Main pipeline entry point - replaces the monolithic script
@@ -250,7 +253,7 @@ end
 
 function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGroup, ...
                                                rawMeanFolder, outputFolders, hasGPU, gpuInfo, modules)
-    % Process a single group - FIXED: Use passed modules instead of reloading
+    % Process a single group - FIXED: Use passed modules correctly
     
     groupTimer = tic;
     result = struct('status', 'processing', 'groupKey', groupKey, 'numFiles', length(filesInGroup));
@@ -258,10 +261,8 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
     fprintf('Processing Group %d: %s (%d files)\n', groupIdx, groupKey, length(filesInGroup));
     
     try
-        % REMOVED: modules = module_loader(); % Don't reload modules in parfor!
-        % Use the passed modules parameter instead
-        
-        [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules);
+        % Process group files
+        [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules, hasGPU, gpuInfo);
         
         if isempty(groupData)
             result.status = 'warning';
@@ -270,8 +271,13 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
             return;
         end
         
+        % Organize data
         [organizedData, averagedData, roiInfo] = modules.organize.organizeGroupData(groupData, groupMetadata, groupKey);
-        saveGroupResults(organizedData, averagedData, roiInfo, groupKey, outputFolders, modules);
+        
+        % Save results using consolidated io manager
+        modules.io.writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, outputFolders.main);
+        
+        % Generate plots
         modules.plot.generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, ...
                                        outputFolders.individual, outputFolders.averaged);
         
@@ -289,8 +295,8 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
     fprintf('  Group %s completed in %.3f seconds [%s]\n', groupKey, processingTime, result.status);
 end
 
-function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules)
-    % Process all files in a group
+function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules, hasGPU, gpuInfo)
+    % FIXED: Process all files in a group with proper module usage
     
     numFiles = length(filesInGroup);
     groupData = cell(numFiles, 1);
@@ -301,9 +307,6 @@ function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFol
     
     for fileIdx = 1:numFiles
         try
-            hasGPU = gpuDeviceCount > 0;
-            gpuInfo = struct('memory', 4); % Default 4GB for parfor
-            
             [data, metadata] = modules.analysis.processSingleFile(...
                 filesInGroup(fileIdx), rawMeanFolder, useReadMatrix, hasGPU, gpuInfo);
             
@@ -325,6 +328,56 @@ function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFol
     if validCount < numFiles
         fprintf('    WARNING: %d/%d files processed successfully\n', validCount, numFiles);
     end
+end
+
+function result = prepareGroupResult(groupData, groupMetadata, roiInfo, status)
+    % Prepare group result summary with comprehensive information
+    
+    result = struct();
+    result.status = status;
+    result.experimentType = roiInfo.experimentType;
+    result.numFiles = length(groupData);
+    result.dataType = roiInfo.dataType;
+    
+    if strcmp(roiInfo.experimentType, 'PPF')
+        if isfield(roiInfo, 'timepoint')
+            result.timepoint = roiInfo.timepoint;
+        end
+        if isfield(roiInfo, 'coverslipFiles')
+            result.numCoverslipFiles = length(roiInfo.coverslipFiles);
+            totalROIs = 0;
+            for i = 1:length(roiInfo.coverslipFiles)
+                totalROIs = totalROIs + length(roiInfo.coverslipFiles(i).roiNumbers);
+            end
+            result.numROIs = totalROIs;
+        end
+    else
+        if isfield(roiInfo, 'roiNumbers')
+            result.numROIs = length(roiInfo.roiNumbers);
+        end
+        if isfield(roiInfo, 'numTrials')
+            result.numTrials = roiInfo.numTrials;
+        end
+    end
+    
+    % Calculate total original ROIs (before filtering)
+    totalOriginalROIs = 0;
+    for i = 1:length(groupMetadata)
+        if isfield(groupMetadata{i}, 'numOriginalROIs')
+            totalOriginalROIs = totalOriginalROIs + groupMetadata{i}.numOriginalROIs;
+        end
+    end
+    result.numOriginalROIs = totalOriginalROIs;
+    
+    % Check GPU usage across files
+    gpuUsed = false;
+    for i = 1:length(groupData)
+        if ~isempty(groupData{i}) && isfield(groupData{i}, 'gpuUsed') && groupData{i}.gpuUsed
+            gpuUsed = true;
+            break;
+        end
+    end
+    result.gpuUsed = gpuUsed;
 end
 
 function saveGroupResults(organizedData, averagedData, roiInfo, groupKey, outputFolders, modules)
@@ -520,46 +573,6 @@ function [row1, row2] = create1APHeaders(dataTable, roiInfo, isTrialData)
     end
 end
 
-function result = prepareGroupResult(groupData, groupMetadata, roiInfo, status)
-    % Prepare group result summary
-    
-    result = struct();
-    result.status = status;
-    result.experimentType = roiInfo.experimentType;
-    result.numFiles = length(groupData);
-    result.dataType = roiInfo.dataType;
-    
-    if strcmp(roiInfo.experimentType, 'PPF')
-        if isfield(roiInfo, 'timepoint')
-            result.timepoint = roiInfo.timepoint;
-        end
-        if isfield(roiInfo, 'coverslipFiles')
-            result.numCoverslipFiles = length(roiInfo.coverslipFiles);
-            totalROIs = 0;
-            for i = 1:length(roiInfo.coverslipFiles)
-                totalROIs = totalROIs + length(roiInfo.coverslipFiles(i).roiNumbers);
-            end
-            result.numROIs = totalROIs;
-        end
-    else
-        if isfield(roiInfo, 'roiNumbers')
-            result.numROIs = length(roiInfo.roiNumbers);
-        end
-        if isfield(roiInfo, 'numTrials')
-            result.numTrials = roiInfo.numTrials;
-        end
-    end
-    
-    % Check GPU usage
-    gpuUsed = false;
-    for i = 1:length(groupData)
-        if ~isempty(groupData{i}) && isfield(groupData{i}, 'gpuUsed') && groupData{i}.gpuUsed
-            gpuUsed = true;
-            break;
-        end
-    end
-    result.gpuUsed = gpuUsed;
-end
 
 function logEntries = logSystemInfo(hasParallelToolbox, hasGPU, gpuInfo)
     % Create system info log entries
@@ -579,3 +592,40 @@ function logEntries = logSystemInfo(hasParallelToolbox, hasGPU, gpuInfo)
         logEntries{end+1} = '  GPU Acceleration: Not Available';
     end
 end
+
+function [hasParallelToolbox, hasGPU, gpuInfo] = detectSystemCapabilities()
+    % Detect system capabilities for optimal processing
+    
+    % Check for Parallel Computing Toolbox
+    hasParallelToolbox = license('test', 'Distrib_Computing_Toolbox');
+    
+    % Initialize GPU info
+    hasGPU = false;
+    gpuInfo = struct('name', 'None', 'memory', 0, 'deviceCount', 0, 'computeCapability', 0);
+    
+    % GPU detection
+    if hasParallelToolbox
+        try
+            gpuDevice(); % Test GPU availability
+            gpu = gpuDevice();
+            hasGPU = true;
+            gpuInfo.name = gpu.Name;
+            gpuInfo.memory = gpu.AvailableMemory / 1e9; % Convert to GB
+            gpuInfo.deviceCount = gpuDeviceCount();
+            gpuInfo.computeCapability = gpu.ComputeCapability;
+            
+            fprintf('GPU detected: %s (%.1f GB available, Compute %.1f)\n', ...
+                   gpuInfo.name, gpuInfo.memory, gpuInfo.computeCapability);
+        catch
+            fprintf('No compatible GPU found\n');
+        end
+    else
+        fprintf('Parallel Computing Toolbox not available\n');
+    end
+end
+
+function controller = addSystemDetection(controller)
+    % Add the detectSystemCapabilities function to the controller
+    controller.detectSystemCapabilities = @detectSystemCapabilities;
+end
+
