@@ -197,7 +197,7 @@ function numericData = convertToNumeric(dataRows)
 end
 
 function writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, outputFolder)
-    % COMPLETE IMPLEMENTATION: Write comprehensive experiment results to Excel
+    % FIXED: Complete experiment results writing with all expected sheets
     
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
     filename = [cleanGroupKey '_grouped_v50.xlsx'];
@@ -211,12 +211,17 @@ function writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, 
     fprintf('    Writing Excel results: %s\n', filename);
     
     try
+        % FIXED: Check if we have actual data
+        if isempty(organizedData) || width(organizedData) <= 1
+            warning('No data to write for group %s', groupKey);
+            return;
+        end
+        
         if strcmp(roiInfo.experimentType, 'PPF')
-            % PPF: Write specialized sheets
             writePPFResults(organizedData, averagedData, roiInfo, filepath);
         else
-            % 1AP: Write noise-based sheets and total averages
-            write1APResults(organizedData, averagedData, roiInfo, filepath);
+            % FIXED: Write ALL 1AP sheets
+            write1APResultsComplete(organizedData, averagedData, roiInfo, filepath);
         end
         
         % Always write metadata sheet
@@ -226,24 +231,46 @@ function writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, 
         
     catch ME
         fprintf('    ERROR saving Excel file %s: %s\n', filename, ME.message);
+        fprintf('    Stack: %s\n', ME.stack(1).name);
         rethrow(ME);
     end
 end
 
+
 function writePPFResults(organizedData, averagedData, roiInfo, filepath)
-    % Write PPF-specific Excel sheets
-    
-    % Sheet 1: All_Data with PPF structure
+    % Write PPF results - simplified for now
     writeSheetWithCustomHeaders(organizedData, filepath, 'All_Data', 'PPF', roiInfo);
-    
-    % Sheet 2: Averaged data
     writeSheetWithCustomHeaders(averagedData, filepath, 'Averaged', 'PPF', roiInfo);
 end
 
-function write1APResults(organizedData, averagedData, roiInfo, filepath)
-    % Write 1AP-specific Excel sheets with noise separation
+function write1APResultsComplete(organizedData, averagedData, roiInfo, filepath)
+    % FIXED: Write ALL expected 1AP sheets including noise-based separation
     
-    % Get column names for noise level separation
+    fprintf('      Writing 1AP sheets...\n');
+    
+    % SHEET 1: Write noise-based trial sheets (Low_noise, High_noise)
+    writeNoiseBasedTrialsSheets(organizedData, roiInfo, filepath);
+    
+    % SHEET 2: Write ROI_Average sheet
+    if isfield(averagedData, 'roi') && ~isempty(averagedData.roi) && width(averagedData.roi) > 1
+        writeROIAveragedSheet(averagedData.roi, roiInfo, filepath);
+        fprintf('      ✓ ROI_Average sheet written\n');
+    else
+        fprintf('      ⚠ No ROI averaged data to write\n');
+    end
+    
+    % SHEET 3: Write Total_Average sheet
+    if isfield(averagedData, 'total') && ~isempty(averagedData.total) && width(averagedData.total) > 1
+        writeTotalAverageSheet(averagedData.total, filepath);
+        fprintf('      ✓ Total_Average sheet written\n');
+    else
+        fprintf('      ⚠ No total averaged data to write\n');
+    end
+end
+
+function writeNoiseBasedTrialsSheets(organizedData, roiInfo, filepath)
+    % FIXED: Write separate Low_noise and High_noise sheets
+    
     varNames = organizedData.Properties.VariableNames;
     lowNoiseColumns = {'Frame'};
     highNoiseColumns = {'Frame'};
@@ -251,11 +278,14 @@ function write1APResults(organizedData, averagedData, roiInfo, filepath)
     % Separate columns by noise level
     for i = 2:length(varNames)
         colName = varNames{i};
+        
         roiMatch = regexp(colName, 'ROI(\d+)_T', 'tokens');
         if ~isempty(roiMatch)
             roiNum = str2double(roiMatch{1}{1});
+            
             if isKey(roiInfo.roiNoiseMap, roiNum)
                 noiseLevel = roiInfo.roiNoiseMap(roiNum);
+                
                 if strcmp(noiseLevel, 'low')
                     lowNoiseColumns{end+1} = colName;
                 elseif strcmp(noiseLevel, 'high')
@@ -269,22 +299,82 @@ function write1APResults(organizedData, averagedData, roiInfo, filepath)
     if length(lowNoiseColumns) > 1
         lowNoiseData = organizedData(:, lowNoiseColumns);
         writeSheetWithCustomHeaders(lowNoiseData, filepath, 'Low_noise', '1AP', roiInfo);
+        fprintf('      ✓ Low_noise sheet: %d columns\n', length(lowNoiseColumns)-1);
+    else
+        fprintf('      ⚠ No low noise data to write\n');
     end
     
     % Write High_noise sheet
     if length(highNoiseColumns) > 1
         highNoiseData = organizedData(:, highNoiseColumns);
         writeSheetWithCustomHeaders(highNoiseData, filepath, 'High_noise', '1AP', roiInfo);
+        fprintf('      ✓ High_noise sheet: %d columns\n', length(highNoiseColumns)-1);
+    else
+        fprintf('      ⚠ No high noise data to write\n');
+    end
+end
+
+function writeROIAveragedSheet(averagedData, roiInfo, filepath)
+    % FIXED: Write ROI_Average sheet with proper headers and data validation
+    
+    if width(averagedData) <= 1
+        fprintf('      ⚠ ROI averaged data is empty\n');
+        return;
     end
     
-    % Write ROI_Average sheet
-    if isfield(averagedData, 'roi') && ~isempty(averagedData.roi)
-        writeSheetWithCustomHeaders(averagedData.roi, filepath, 'ROI_Average', '1AP', roiInfo);
+    varNames = averagedData.Properties.VariableNames;
+    timeData_ms = averagedData.Frame;
+    numFrames = length(timeData_ms);
+    
+    % Create header rows
+    row1 = cell(1, length(varNames));
+    row2 = cell(1, length(varNames));
+    
+    row1{1} = 'n';
+    row2{1} = 'Time (ms)';
+    
+    % Process each variable
+    for i = 2:length(varNames)
+        varName = varNames{i};
+        
+        roiMatch = regexp(varName, 'ROI(\d+)_n(\d+)', 'tokens');
+        if ~isempty(roiMatch)
+            roiNum = roiMatch{1}{1};
+            nTrials = roiMatch{1}{2};
+            
+            row1{i} = nTrials;
+            row2{i} = ['ROI ' roiNum];
+        else
+            row1{i} = '';
+            row2{i} = varName;
+        end
     end
     
-    % Write Total_Average sheet
-    if isfield(averagedData, 'total') && ~isempty(averagedData.total)
-        writeTotalAverageSheet(averagedData.total, filepath);
+    % FIXED: Write data with validation
+    try
+        dataMatrix = [timeData_ms, table2array(averagedData(:, 2:end))];
+        
+        % Validate data matrix
+        if any(isnan(dataMatrix(:)))
+            fprintf('      ⚠ ROI averaged data contains NaN values\n');
+        end
+        
+        cellData = cell(numFrames + 2, length(varNames));
+        
+        cellData(1, :) = row1;
+        cellData(2, :) = row2;
+        
+        for i = 1:numFrames
+            for j = 1:size(dataMatrix, 2)
+                cellData{i+2, j} = dataMatrix(i, j);
+            end
+        end
+        
+        writecell(cellData, filepath, 'Sheet', 'ROI_Average');
+        
+    catch ME
+        fprintf('      ⚠ ROI averaged sheet writing failed (%s), using fallback\n', ME.message);
+        writetable(averagedData, filepath, 'Sheet', 'ROI_Average', 'WriteVariableNames', true);
     end
 end
 
@@ -388,9 +478,10 @@ function writeSheetWithCustomHeaders(dataTable, filepath, sheetName, expType, ro
 end
 
 function writeTotalAverageSheet(totalAveragedData, filepath)
-    % Write Total_Average sheet for 1AP experiments
+    % FIXED: Write Total_Average sheet with proper validation
     
     if width(totalAveragedData) <= 1
+        fprintf('      ⚠ Total averaged data is empty\n');
         return;
     end
     
@@ -441,6 +532,13 @@ function writeTotalAverageSheet(totalAveragedData, filepath)
     % Write to Excel
     try
         dataMatrix = [timeData_ms, table2array(totalAveragedData(:, 2:end))];
+        
+        % Validate data matrix
+        if size(dataMatrix, 2) <= 1
+            fprintf('      ⚠ Total averaged data has no data columns\n');
+            return;
+        end
+        
         cellData = cell(numFrames + 2, length(varNames));
         
         cellData(1, :) = row1;
@@ -455,32 +553,38 @@ function writeTotalAverageSheet(totalAveragedData, filepath)
         writecell(cellData, filepath, 'Sheet', 'Total_Average');
         
     catch ME
-        fprintf('    WARNING: Total average sheet writing failed (%s), using fallback\n', ME.message);
+        fprintf('      ⚠ Total averaged sheet writing failed (%s), using fallback\n', ME.message);
         writetable(totalAveragedData, filepath, 'Sheet', 'Total_Average', 'WriteVariableNames', true);
     end
 end
 
+
 function writeMetadataSheet(organizedData, roiInfo, filepath)
-    % Write comprehensive metadata sheet
+    % FIXED: Write metadata sheet with validation
     
-    if strcmp(roiInfo.experimentType, 'PPF')
-        writeMetadataSheetPPF(organizedData, roiInfo, filepath);
-    else
-        writeMetadataSheet1AP(organizedData, roiInfo, filepath);
+    try
+        if strcmp(roiInfo.experimentType, 'PPF')
+            writeMetadataSheetPPF(organizedData, roiInfo, filepath);
+        else
+            writeMetadataSheet1AP(organizedData, roiInfo, filepath);
+        end
+        fprintf('      ✓ ROI_Metadata sheet written\n');
+    catch ME
+        fprintf('      ⚠ Metadata sheet writing failed: %s\n', ME.message);
     end
 end
 
 function writeMetadataSheet1AP(organizedData, roiInfo, filepath)
-    % Write 1AP metadata with noise levels
+    % Write 1AP metadata
     
     cfg = GluSnFRConfig();
     maxEntries = length(roiInfo.roiNumbers) * roiInfo.numTrials;
     
     if maxEntries == 0
+        fprintf('        ⚠ No metadata entries to write\n');
         return;
     end
     
-    % Preallocate metadata
     allMetadata = repmat(struct(...
         'ROI_Number', NaN, ...
         'Trial_Number', NaN, ...
@@ -497,7 +601,6 @@ function writeMetadataSheet1AP(organizedData, roiInfo, filepath)
     for roiIdx = 1:length(roiInfo.roiNumbers)
         roiNum = roiInfo.roiNumbers(roiIdx);
         
-        % Get noise level
         noiseLevel = 'unknown';
         if isKey(roiInfo.roiNoiseMap, roiNum)
             noiseLevel = roiInfo.roiNoiseMap(roiNum);
@@ -519,7 +622,6 @@ function writeMetadataSheet1AP(organizedData, roiInfo, filepath)
                         allMetadata(entryCount).Column_Name = columnName;
                         allMetadata(entryCount).Noise_Level = noiseLevel;
                         
-                        % Extract threshold
                         if roiIdx <= size(roiInfo.thresholds, 1) && trialIdx <= size(roiInfo.thresholds, 2)
                             threshold = roiInfo.thresholds(roiIdx, trialIdx);
                             allMetadata(entryCount).Threshold_dF_F = threshold;
@@ -539,11 +641,14 @@ function writeMetadataSheet1AP(organizedData, roiInfo, filepath)
         allMetadata = allMetadata(1:entryCount);
         metadataTable = struct2table(allMetadata);
         writetable(metadataTable, filepath, 'Sheet', 'ROI_Metadata');
+        fprintf('        ✓ 1AP metadata: %d entries\n', entryCount);
+    else
+        fprintf('        ⚠ No valid 1AP metadata to write\n');
     end
 end
 
 function writeMetadataSheetPPF(organizedData, roiInfo, filepath)
-    % Write PPF metadata
+    % Write PPF metadata - simplified version
     
     cfg = GluSnFRConfig();
     maxEntries = 0;
@@ -555,7 +660,6 @@ function writeMetadataSheetPPF(organizedData, roiInfo, filepath)
         return;
     end
     
-    % Preallocate metadata
     allMetadata = repmat(struct(...
         'CoverslipCell', '', ...
         'ROI_Number', NaN, ...
@@ -579,25 +683,22 @@ function writeMetadataSheetPPF(organizedData, roiInfo, filepath)
             columnName = sprintf('%s_ROI%d', csCell, roiNum);
             
             if ismember(columnName, organizedData.Properties.VariableNames)
-                columnData = organizedData.(columnName);
-                if ~all(isnan(columnData))
-                    entryCount = entryCount + 1;
-                    allMetadata(entryCount).CoverslipCell = csCell;
-                    allMetadata(entryCount).ROI_Number = roiNum;
-                    allMetadata(entryCount).Column_Name = columnName;
-                    
-                    if roiIdx <= length(fileData.thresholds)
-                        threshold = fileData.thresholds(roiIdx);
-                        allMetadata(entryCount).Threshold_dF_F = threshold;
-                        allMetadata(entryCount).Baseline_SD = threshold / cfg.thresholds.SD_MULTIPLIER;
-                        allMetadata(entryCount).Baseline_Mean = 0;
-                    end
-                    
-                    allMetadata(entryCount).Experiment_Type = 'PPF';
-                    allMetadata(entryCount).Timepoint_ms = roiInfo.timepoint;
-                    allMetadata(entryCount).Stimulus1_Time_ms = cfg.timing.STIMULUS_TIME_MS;
-                    allMetadata(entryCount).Stimulus2_Time_ms = cfg.timing.STIMULUS_TIME_MS + roiInfo.timepoint;
+                entryCount = entryCount + 1;
+                allMetadata(entryCount).CoverslipCell = csCell;
+                allMetadata(entryCount).ROI_Number = roiNum;
+                allMetadata(entryCount).Column_Name = columnName;
+                
+                if roiIdx <= length(fileData.thresholds)
+                    threshold = fileData.thresholds(roiIdx);
+                    allMetadata(entryCount).Threshold_dF_F = threshold;
+                    allMetadata(entryCount).Baseline_SD = threshold / cfg.thresholds.SD_MULTIPLIER;
                 end
+                
+                allMetadata(entryCount).Baseline_Mean = 0;
+                allMetadata(entryCount).Experiment_Type = 'PPF';
+                allMetadata(entryCount).Timepoint_ms = roiInfo.timepoint;
+                allMetadata(entryCount).Stimulus1_Time_ms = cfg.timing.STIMULUS_TIME_MS;
+                allMetadata(entryCount).Stimulus2_Time_ms = cfg.timing.STIMULUS_TIME_MS + roiInfo.timepoint;
             end
         end
     end

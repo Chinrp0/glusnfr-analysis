@@ -15,7 +15,15 @@ function plot = plot_generator()
 end
 
 function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, plotsIndividualFolder, plotsAveragedFolder)
-    % Main plotting dispatcher
+    % FIXED: Main plotting dispatcher with better validation
+    
+    fprintf('    Generating plots for group: %s\n', groupKey);
+    
+    % Check if we have data to plot
+    if isempty(organizedData) || width(organizedData) <= 1
+        fprintf('    No data to plot for group %s (organized data empty)\n', groupKey);
+        return;
+    end
     
     if strcmp(roiInfo.experimentType, 'PPF')
         generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, plotsIndividualFolder, plotsAveragedFolder);
@@ -27,18 +35,36 @@ function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, plot
         if ~exist(roiPlotsFolder, 'dir'), mkdir(roiPlotsFolder); end
         if ~exist(totalPlotsFolder, 'dir'), mkdir(totalPlotsFolder); end
         
-        generate1APPlots(organizedData, averagedData.roi, roiInfo, groupKey, plotsIndividualFolder, roiPlotsFolder);
-        generateTotalAveragePlots(averagedData.total, roiInfo, groupKey, totalPlotsFolder);
+        % Check if we have averaged data
+        if isfield(averagedData, 'roi') && ~isempty(averagedData.roi)
+            generate1APPlots(organizedData, averagedData.roi, roiInfo, groupKey, plotsIndividualFolder, roiPlotsFolder);
+        else
+            fprintf('    No ROI averaged data for plotting\n');
+        end
+        
+        if isfield(averagedData, 'total') && ~isempty(averagedData.total)
+            generateTotalAveragePlots(averagedData.total, roiInfo, groupKey, totalPlotsFolder);
+        else
+            fprintf('    No total averaged data for plotting\n');
+        end
     end
 end
 
 function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, plotsIndividualFolder, plotsAveragedFolder)
-    % Generate 1AP-specific plots with noise level awareness
+    % FIXED: 1AP plotting with better data validation
     
     cfg = GluSnFRConfig();
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
     timeData_ms = organizedData.Frame;
     stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS;
+    
+    % Check if we have ROIs to plot
+    if isempty(roiInfo.roiNumbers)
+        fprintf('    No ROIs available for plotting\n');
+        return;
+    end
+    
+    fprintf('    Generating 1AP plots for %d ROIs\n', length(roiInfo.roiNumbers));
     
     % Color scheme for trials
     trialColors = [
@@ -57,18 +83,19 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, plotsI
     maxPlotsPerFigure = cfg.plotting.MAX_PLOTS_PER_FIGURE;
     numROIs = length(roiInfo.roiNumbers);
     
-    if numROIs == 0
-        fprintf('    No ROIs to plot for group %s\n', groupKey);
-        return;
-    end
-    
     % Get unique trials for consistent coloring
     uniqueTrials = unique(roiInfo.originalTrialNumbers);
     uniqueTrials = uniqueTrials(isfinite(uniqueTrials));
     uniqueTrials = sort(uniqueTrials);
     
+    if isempty(uniqueTrials)
+        fprintf('    No valid trials found for plotting\n');
+        return;
+    end
+    
     % Generate individual trials plots
     numTrialsFigures = ceil(numROIs / maxPlotsPerFigure);
+    plotsGenerated = 0;
     
     for figNum = 1:numTrialsFigures
         try
@@ -83,6 +110,7 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, plotsI
             % Track legend handles
             legendHandles = [];
             legendLabels = {};
+            hasData = false;
             
             for roiIdx = startROI:endROI
                 subplotIdx = roiIdx - startROI + 1;
@@ -103,6 +131,7 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, plotsI
                         trialData = organizedData.(colName);
                         if ~all(isnan(trialData))
                             trialCount = trialCount + 1;
+                            hasData = true;
                             
                             colorIdx = mod(i-1, size(trialColors, 1)) + 1;
                             h_line = plot(timeData_ms, trialData, 'Color', trialColors(colorIdx, :), 'LineWidth', 1.0);
@@ -153,22 +182,28 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, plotsI
                 hold off;
             end
             
-            % Add legend
-            if ~isempty(legendHandles)
-                legend(legendHandles, legendLabels, 'Location', 'northeast', 'FontSize', 8);
+            % Only save if we have data
+            if hasData
+                % Add legend
+                if ~isempty(legendHandles)
+                    legend(legendHandles, legendLabels, 'Location', 'northeast', 'FontSize', 8);
+                end
+                
+                % Save figure
+                if numTrialsFigures > 1
+                    titleText = sprintf('%s - Individual Trials (Part %d/%d)', cleanGroupKey, figNum, numTrialsFigures);
+                    plotFile = sprintf('%s_trials_part%d.png', cleanGroupKey, figNum);
+                else
+                    titleText = sprintf('%s - Individual Trials', cleanGroupKey);
+                    plotFile = sprintf('%s_trials.png', cleanGroupKey);
+                end
+                
+                sgtitle(titleText, 'FontSize', 14, 'Interpreter', 'none', 'FontWeight', 'bold');
+                print(fig, fullfile(plotsIndividualFolder, plotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
+                plotsGenerated = plotsGenerated + 1;
+                fprintf('      ✓ Generated trial plot: %s\n', plotFile);
             end
             
-            % Save figure
-            if numTrialsFigures > 1
-                titleText = sprintf('%s - Individual Trials (Part %d/%d)', cleanGroupKey, figNum, numTrialsFigures);
-                plotFile = sprintf('%s_trials_part%d.png', cleanGroupKey, figNum);
-            else
-                titleText = sprintf('%s - Individual Trials', cleanGroupKey);
-                plotFile = sprintf('%s_trials.png', cleanGroupKey);
-            end
-            
-            sgtitle(titleText, 'FontSize', 14, 'Interpreter', 'none', 'FontWeight', 'bold');
-            print(fig, fullfile(plotsIndividualFolder, plotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
             close(fig);
             
         catch ME
@@ -178,15 +213,22 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, plotsI
     end
     
     % Generate averaged plots
-    generateAveragedPlots(averagedData, roiInfo, cleanGroupKey, plotsAveragedFolder, timeData_ms, stimulusTime_ms, cfg);
+    if ~isempty(averagedData) && width(averagedData) > 1
+        avgPlotsGenerated = generateAveragedPlots(averagedData, roiInfo, cleanGroupKey, plotsAveragedFolder, timeData_ms, stimulusTime_ms, cfg);
+        plotsGenerated = plotsGenerated + avgPlotsGenerated;
+    end
     
-    fprintf('    Generated %d trials plot(s) and averaged plots\n', numTrialsFigures);
+    fprintf('    Generated %d plot files total\n', plotsGenerated);
 end
 
-function generateAveragedPlots(averagedData, roiInfo, cleanGroupKey, plotsFolder, timeData_ms, stimulusTime_ms, cfg)
-    % Generate averaged plots for 1AP experiments
+
+function numGenerated = generateAveragedPlots(averagedData, roiInfo, cleanGroupKey, plotsFolder, timeData_ms, stimulusTime_ms, cfg)
+    % FIXED: Generate averaged plots with validation
+    
+    numGenerated = 0;
     
     if width(averagedData) <= 1
+        fprintf('      No averaged data to plot\n');
         return;
     end
     
@@ -207,6 +249,7 @@ function generateAveragedPlots(averagedData, roiInfo, cleanGroupKey, plotsFolder
             
             legendHandles = [];
             legendLabels = {};
+            hasData = false;
             
             for plotIdx = startPlot:endPlot
                 subplotIdx = plotIdx - startPlot + 1;
@@ -217,23 +260,28 @@ function generateAveragedPlots(averagedData, roiInfo, cleanGroupKey, plotsFolder
                 varName = avgVarNames{plotIdx};
                 avgData = averagedData.(varName);
                 
-                % Plot average trace
-                h_line = plot(timeData_ms, avgData, 'k-', 'LineWidth', 1.0);
-                
-                if subplotIdx == 1
-                    legendHandles(end+1) = h_line;
-                    legendLabels{end+1} = 'Average';
-                end
-                
-                % Add threshold
-                avgThreshold = calculateAverageThreshold(avgData, cfg);
-                if isfinite(avgThreshold)
-                    hThresh = plot([timeData_ms(1), timeData_ms(100)], [avgThreshold, avgThreshold], ...
-                         'g--', 'LineWidth', 2, 'HandleVisibility', 'off');
+                % Check if data is valid
+                if ~all(isnan(avgData))
+                    hasData = true;
+                    
+                    % Plot average trace
+                    h_line = plot(timeData_ms, avgData, 'k-', 'LineWidth', 1.0);
                     
                     if subplotIdx == 1
-                        legendHandles(end+1) = hThresh;
-                        legendLabels{end+1} = 'Threshold';
+                        legendHandles(end+1) = h_line;
+                        legendLabels{end+1} = 'Average';
+                    end
+                    
+                    % Add threshold
+                    avgThreshold = calculateAverageThreshold(avgData, cfg);
+                    if isfinite(avgThreshold)
+                        hThresh = plot([timeData_ms(1), timeData_ms(100)], [avgThreshold, avgThreshold], ...
+                             'g--', 'LineWidth', 2, 'HandleVisibility', 'off');
+                        
+                        if subplotIdx == 1
+                            legendHandles(end+1) = hThresh;
+                            legendLabels{end+1} = 'Threshold';
+                        end
                     end
                 end
                 
@@ -261,22 +309,28 @@ function generateAveragedPlots(averagedData, roiInfo, cleanGroupKey, plotsFolder
                 hold off;
             end
             
-            % Add legend
-            if ~isempty(legendHandles)
-                legend(legendHandles, legendLabels, 'Location', 'northeast', 'FontSize', 8);
+            % Only save if we have data
+            if hasData
+                % Add legend
+                if ~isempty(legendHandles)
+                    legend(legendHandles, legendLabels, 'Location', 'northeast', 'FontSize', 8);
+                end
+                
+                % Save figure
+                if numAvgFigures > 1
+                    titleText = sprintf('%s - Averaged Traces (Part %d/%d)', cleanGroupKey, figNum, numAvgFigures);
+                    avgPlotFile = sprintf('%s_averaged_part%d.png', cleanGroupKey, figNum);
+                else
+                    titleText = sprintf('%s - Averaged Traces', cleanGroupKey);
+                    avgPlotFile = sprintf('%s_averaged.png', cleanGroupKey);
+                end
+                
+                sgtitle(titleText, 'FontSize', 14, 'FontWeight', 'bold', 'Interpreter', 'none');
+                print(figAvg, fullfile(plotsFolder, avgPlotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
+                numGenerated = numGenerated + 1;
+                fprintf('      ✓ Generated averaged plot: %s\n', avgPlotFile);
             end
             
-            % Save figure
-            if numAvgFigures > 1
-                titleText = sprintf('%s - Averaged Traces (Part %d/%d)', cleanGroupKey, figNum, numAvgFigures);
-                avgPlotFile = sprintf('%s_averaged_part%d.png', cleanGroupKey, figNum);
-            else
-                titleText = sprintf('%s - Averaged Traces', cleanGroupKey);
-                avgPlotFile = sprintf('%s_averaged.png', cleanGroupKey);
-            end
-            
-            sgtitle(titleText, 'FontSize', 14, 'FontWeight', 'bold', 'Interpreter', 'none');
-            print(figAvg, fullfile(plotsFolder, avgPlotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
             close(figAvg);
             
         catch ME
@@ -287,7 +341,7 @@ function generateAveragedPlots(averagedData, roiInfo, cleanGroupKey, plotsFolder
 end
 
 function generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, plotsIndividualFolder, plotsAveragedFolder)
-    % Generate PPF-specific plots with genotype colors
+    % FIXED: PPF plotting with validation
     
     cfg = GluSnFRConfig();
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
@@ -298,11 +352,21 @@ function generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, plotsI
     % Extract genotype for color coding
     genotype = extractGenotypeFromGroupKey(groupKey);
     
+    fprintf('    Generating PPF plots for %s, timepoint=%dms\n', genotype, roiInfo.timepoint);
+    
+    % Check if we have data
+    if width(organizedData) <= 1
+        fprintf('    No PPF data to plot\n');
+        return;
+    end
+    
     % Generate individual plots by coverslip
     generatePPFIndividualPlots(organizedData, roiInfo, genotype, plotsIndividualFolder, timeData_ms, stimulusTime_ms1, stimulusTime_ms2, cfg);
     
     % Generate averaged plots
-    generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype, plotsAveragedFolder, timeData_ms, stimulusTime_ms1, stimulusTime_ms2, cfg);
+    if ~isempty(averagedData) && width(averagedData) > 1
+        generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype, plotsAveragedFolder, timeData_ms, stimulusTime_ms1, stimulusTime_ms2, cfg);
+    end
     
     fprintf('    PPF plots complete for genotype %s\n', genotype);
 end
@@ -357,6 +421,7 @@ function generatePPFIndividualPlots(organizedData, roiInfo, genotype, plotsFolde
                 endROI = min(figNum * maxPlotsPerFigure, length(csROIs));
                 
                 [nRows, nCols] = calculateOptimalLayout(endROI - startROI + 1);
+                hasData = false;
                 
                 for roiIdx = startROI:endROI
                     subplotIdx = roiIdx - startROI + 1;
@@ -368,6 +433,7 @@ function generatePPFIndividualPlots(organizedData, roiInfo, genotype, plotsFolde
                     
                     % Plot in black
                     if ~all(isnan(traceData))
+                        hasData = true;
                         plot(timeData_ms, traceData, 'k-', 'LineWidth', 1.0);
                         
                         % Add threshold
@@ -395,17 +461,22 @@ function generatePPFIndividualPlots(organizedData, roiInfo, genotype, plotsFolde
                     hold off;
                 end
                 
-                % Figure title and save
-                if numFigures > 1
-                    titleText = sprintf('PPF %dms %s %s (Part %d/%d)', roiInfo.timepoint, genotype, csCell, figNum, numFigures);
-                    plotFile = sprintf('PPF_%dms_%s_%s_individual_part%d.png', roiInfo.timepoint, genotype, csCell, figNum);
-                else
-                    titleText = sprintf('PPF %dms %s %s', roiInfo.timepoint, genotype, csCell);
-                    plotFile = sprintf('PPF_%dms_%s_%s_individual.png', roiInfo.timepoint, genotype, csCell);
+                % Only save if we have data
+                if hasData
+                    % Figure title and save
+                    if numFigures > 1
+                        titleText = sprintf('PPF %dms %s %s (Part %d/%d)', roiInfo.timepoint, genotype, csCell, figNum, numFigures);
+                        plotFile = sprintf('PPF_%dms_%s_%s_individual_part%d.png', roiInfo.timepoint, genotype, csCell, figNum);
+                    else
+                        titleText = sprintf('PPF %dms %s %s', roiInfo.timepoint, genotype, csCell);
+                        plotFile = sprintf('PPF_%dms_%s_%s_individual.png', roiInfo.timepoint, genotype, csCell);
+                    end
+                    
+                    sgtitle(titleText, 'FontSize', 14, 'FontWeight', 'bold');
+                    print(fig, fullfile(plotsFolder, plotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
+                    fprintf('      ✓ Generated PPF individual plot: %s\n', plotFile);
                 end
                 
-                sgtitle(titleText, 'FontSize', 14, 'FontWeight', 'bold');
-                print(fig, fullfile(plotsFolder, plotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
                 close(fig);
                 
             catch ME
@@ -446,6 +517,7 @@ function generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype
             endPlot = min(figNum * maxPlotsPerFigure, numAvgPlots);
             
             [nRowsAvg, nColsAvg] = calculateOptimalLayout(endPlot - startPlot + 1);
+            hasData = false;
             
             for plotIdx = startPlot:endPlot
                 subplotIdx = plotIdx - startPlot + 1;
@@ -456,13 +528,18 @@ function generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype
                 varName = avgVarNames{plotIdx};
                 avgData = averagedData.(varName);
                 
-                % Plot in genotype-specific color
-                plot(timeData_ms, avgData, 'Color', traceColor, 'LineWidth', 1.0);
-                
-                % Add threshold
-                avgThreshold = calculateAverageThreshold(avgData, cfg);
-                if isfinite(avgThreshold)
-                    plot([timeData_ms(1), timeData_ms(100)], [avgThreshold, avgThreshold], 'g--', 'LineWidth', 1.5);
+                % Check for valid data
+                if ~all(isnan(avgData))
+                    hasData = true;
+                    
+                    % Plot in genotype-specific color
+                    plot(timeData_ms, avgData, 'Color', traceColor, 'LineWidth', 1.0);
+                    
+                    % Add threshold
+                    avgThreshold = calculateAverageThreshold(avgData, cfg);
+                    if isfinite(avgThreshold)
+                        plot([timeData_ms(1), timeData_ms(100)], [avgThreshold, avgThreshold], 'g--', 'LineWidth', 1.5);
+                    end
                 end
                 
                 % Title with genotype
@@ -485,17 +562,22 @@ function generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype
                 hold off;
             end
             
-            % Figure title and save
-            if numAvgFigures > 1
-                titleText = sprintf('PPF %dms %s - Averaged (Part %d/%d)', roiInfo.timepoint, genotype, figNum, numAvgFigures);
-                avgPlotFile = sprintf('PPF_%dms_%s_averaged_part%d.png', roiInfo.timepoint, genotype, figNum);
-            else
-                titleText = sprintf('PPF %dms %s - Averaged', roiInfo.timepoint, genotype);
-                avgPlotFile = sprintf('PPF_%dms_%s_averaged.png', roiInfo.timepoint, genotype);
+            % Only save if we have data
+            if hasData
+                % Figure title and save
+                if numAvgFigures > 1
+                    titleText = sprintf('PPF %dms %s - Averaged (Part %d/%d)', roiInfo.timepoint, genotype, figNum, numAvgFigures);
+                    avgPlotFile = sprintf('PPF_%dms_%s_averaged_part%d.png', roiInfo.timepoint, genotype, figNum);
+                else
+                    titleText = sprintf('PPF %dms %s - Averaged', roiInfo.timepoint, genotype);
+                    avgPlotFile = sprintf('PPF_%dms_%s_averaged.png', roiInfo.timepoint, genotype);
+                end
+                
+                sgtitle(titleText, 'FontSize', 14, 'FontWeight', 'bold');
+                print(figAvg, fullfile(plotsFolder, avgPlotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
+                fprintf('      ✓ Generated PPF averaged plot: %s\n', avgPlotFile);
             end
             
-            sgtitle(titleText, 'FontSize', 14, 'FontWeight', 'bold');
-            print(figAvg, fullfile(plotsFolder, avgPlotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
             close(figAvg);
             
         catch ME
@@ -506,9 +588,10 @@ function generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype
 end
 
 function generateTotalAveragePlots(totalAveragedData, roiInfo, groupKey, plotsFolder)
-    % Generate plots for total averages (1AP experiments)
+    % FIXED: Generate plots for total averages (1AP experiments)
     
     if width(totalAveragedData) <= 1
+        fprintf('    No total averaged data to plot\n');
         return;
     end
     
@@ -525,56 +608,66 @@ function generateTotalAveragePlots(totalAveragedData, roiInfo, groupKey, plotsFo
         hold on;
         legendHandles = [];
         legendLabels = {};
+        hasData = false;
         
         for i = 1:length(varNames)
             varName = varNames{i};
             data = totalAveragedData.(varName);
             
-            % Determine color and style
-            if contains(varName, 'Low_Noise')
-                color = [0.2, 0.6, 0.2];  % Green
-                displayName = 'Low Noise';
-            elseif contains(varName, 'High_Noise')
-                color = [0.8, 0.2, 0.2];  % Red
-                displayName = 'High Noise';
-            elseif contains(varName, 'All_')
-                color = [0.2, 0.2, 0.8];  % Blue
-                displayName = 'All ROIs';
-            else
-                color = [0.5, 0.5, 0.5];  % Gray
-                displayName = varName;
+            % Check for valid data
+            if ~all(isnan(data))
+                hasData = true;
+                
+                % Determine color and style
+                if contains(varName, 'Low_Noise')
+                    color = [0.2, 0.6, 0.2];  % Green
+                    displayName = 'Low Noise';
+                elseif contains(varName, 'High_Noise')
+                    color = [0.8, 0.2, 0.2];  % Red
+                    displayName = 'High Noise';
+                elseif contains(varName, 'All_')
+                    color = [0.2, 0.2, 0.8];  % Blue
+                    displayName = 'All ROIs';
+                else
+                    color = [0.5, 0.5, 0.5];  % Gray
+                    displayName = varName;
+                end
+                
+                % Extract n count
+                nMatch = regexp(varName, 'n(\d+)', 'tokens');
+                if ~isempty(nMatch)
+                    displayName = sprintf('%s (n=%s)', displayName, nMatch{1}{1});
+                end
+                
+                h = plot(timeData_ms, data, 'Color', color, 'LineWidth', 2);
+                legendHandles(end+1) = h;
+                legendLabels{end+1} = displayName;
             end
-            
-            % Extract n count
-            nMatch = regexp(varName, 'n(\d+)', 'tokens');
-            if ~isempty(nMatch)
-                displayName = sprintf('%s (n=%s)', displayName, nMatch{1}{1});
-            end
-            
-            h = plot(timeData_ms, data, 'Color', color, 'LineWidth', 2);
-            legendHandles(end+1) = h;
-            legendLabels{end+1} = displayName;
         end
         
-        % Add stimulus
-        ylim(cfg.plotting.Y_LIMITS);
-        hStim = plot([stimulusTime_ms, stimulusTime_ms], [cfg.plotting.Y_LIMITS(1), cfg.plotting.Y_LIMITS(1)], ':gpentagram', 'LineWidth', 1.0);
-        legendHandles(end+1) = hStim;
-        legendLabels{end+1} = 'Stimulus';
+        % Only save if we have data
+        if hasData
+            % Add stimulus
+            ylim(cfg.plotting.Y_LIMITS);
+            hStim = plot([stimulusTime_ms, stimulusTime_ms], [cfg.plotting.Y_LIMITS(1), cfg.plotting.Y_LIMITS(1)], ':gpentagram', 'LineWidth', 1.0);
+            legendHandles(end+1) = hStim;
+            legendLabels{end+1} = 'Stimulus';
+            
+            title(sprintf('%s - Total Averages by Noise Level', cleanGroupKey), 'FontSize', 14, 'FontWeight', 'bold', 'Interpreter', 'none');
+            xlabel('Time (ms)', 'FontSize', 12);
+            ylabel('ΔF/F', 'FontSize', 12);
+            grid on; box on;
+            
+            legend(legendHandles, legendLabels, 'Location', 'northeast', 'FontSize', 10);
+            hold off;
+            
+            plotFile = sprintf('%s_total_averages.png', cleanGroupKey);
+            print(fig, fullfile(plotsFolder, plotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
+            
+            fprintf('    ✓ Generated total averages plot: %s\n', plotFile);
+        end
         
-        title(sprintf('%s - Total Averages by Noise Level', cleanGroupKey), 'FontSize', 14, 'FontWeight', 'bold', 'Interpreter', 'none');
-        xlabel('Time (ms)', 'FontSize', 12);
-        ylabel('ΔF/F', 'FontSize', 12);
-        grid on; box on;
-        
-        legend(legendHandles, legendLabels, 'Location', 'northeast', 'FontSize', 10);
-        hold off;
-        
-        plotFile = sprintf('%s_total_averages.png', cleanGroupKey);
-        print(fig, fullfile(plotsFolder, plotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
         close(fig);
-        
-        fprintf('    Generated total averages plot\n');
         
     catch ME
         fprintf('    ERROR creating total averages plot: %s\n', ME.message);

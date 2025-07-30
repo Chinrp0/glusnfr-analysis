@@ -1,9 +1,8 @@
 GluSnFR Pipeline Error Report
-Time: 30-Jul-2025 10:49:21
-Error: Module loading failed: Unrecognized function or variable 'GluSnFRConfig'.
-Stack: module_loader
+Time: 30-Jul-2025 12:59:57
+Error: No groups processed successfully
 
 Stack Trace:
-  module_loader (line 35)
-  runMainPipeline (line 36)
-  main_glusnfr_pipeline (line 30)
+  validateProcessingResults (line 166)
+  runMainPipeline (line 78)
+  main_glusnfr_pipeline (line 27)
