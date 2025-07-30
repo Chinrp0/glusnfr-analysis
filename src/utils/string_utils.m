@@ -159,8 +159,8 @@ function [trialNum, expType, ppiValue, coverslipCell] = extractTrialInfoOptimize
     end
 end
 
-function [trialNum, expType, ppiValue, coverslipCell] = extractTrialOrPPIOptimized(filename)
-    % MISSING FUNCTION: Comprehensive trial/PPI extraction (from original script)
+function [trialNum, expType, ppiValue, coverslipCell] = extractTrialOrPPI(filename)
+    % Comprehensive trial/PPI extraction (from original script)
     % This is the EXACT function from the original backup_original_v50.m
     
     trialNum = NaN;
@@ -229,7 +229,6 @@ function [trialNum, expType, ppiValue, coverslipCell] = extractTrialOrPPIOptimiz
     end
 end
 
-
 function genotype = extractGenotypeOptimized(groupKey)
     % Extract genotype from group key
     
@@ -243,17 +242,16 @@ function genotype = extractGenotypeOptimized(groupKey)
 end
 
 function info = parseFilenameOptimized(filename)
-    % Comprehensive filename parsing
-    
-    utils = string_utils();
+    % Comprehensive filename parsing - FIXED to avoid recursive calls
     
     info = struct();
     info.filename = filename;
-    info.groupKey = utils.extractGroupKey(filename);
-    info.genotype = utils.extractGenotype(info.groupKey);
+    info.groupKey = extractGroupKeyOptimized(filename);
+    info.genotype = extractGenotypeOptimized(info.groupKey);
     
+    % Call the function directly to avoid recursive calls
     [info.trialNum, info.expType, info.ppiValue, info.coverslipCell] = ...
-        utils.extractTrialInfo(filename);
+        extractTrialInfoOptimized(filename);
     
     info.isValid = ~isempty(info.groupKey) && ~isempty(info.expType);
 end

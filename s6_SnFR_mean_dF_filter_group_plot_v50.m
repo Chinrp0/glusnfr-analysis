@@ -6,30 +6,16 @@
 %   Add complete average per genotype & condition
 
 
-%% INTEGRATION WITH NEW MODULAR FUNCTIONS
-% Add all project modules to path
-projectRoot = fileparts(mfilename('fullpath'));
-addpath(genpath(projectRoot));
-
-% Load configuration and modules
-cfg = GluSnFRConfig();
-utils = string_utils();
-calc = df_calculator();
-filter = roi_filter();
-memMgr = memory_manager();
-
-fprintf('Loaded modular functions (v%s)\n', cfg.version);
-
 %% Initialize and validate system capabilities with  configuration
-scriptName = 's6_SnFR_mean_dF_filter_group_plot_v50backup.m';
-fprintf('=== OPTIMIZED dF/F GROUPED ANALYSIS v50backup (1AP and PPF!) ===\n');
+scriptName = 's6_SnFR_mean_dF_filter_group_plot_v50.m';
+fprintf('=== OPTIMIZED dF/F GROUPED ANALYSIS v50 (1AP and PPF!) ===\n');
 fprintf('Script: %s\n', scriptName);
 fprintf('Data Type: Evoked glutamate release with iGlu3Fast\n');
 fprintf('Sampling: 200Hz (5ms per frame)\n');
 
 % Initialize  logging
 logBuffer = {};
-logBuffer{end+1} = sprintf('=== OPTIMIZED dF/F GROUPED ANALYSIS v50backup (1AP and PPF!) ===\n');
+logBuffer{end+1} = sprintf('=== OPTIMIZED dF/F GROUPED ANALYSIS v50 (1AP and PPF!) ===\n');
 logBuffer{end+1} = sprintf('Script: %s', scriptName);
 logBuffer{end+1} = sprintf('Data Type: Evoked glutamate release with iGlu3Fast\n');
 logBuffer{end+1} = sprintf('Sampling: 200Hz (5ms per frame)');
@@ -112,9 +98,9 @@ end
 
 % Create output folders (xlsx files in main folder, plots in subfolders)
 processedImagesFolder = fileparts(rawMeanFolder);
-dF_grouped_folder = fullfile(processedImagesFolder, '6_v50backup_dF_F');
-plotsIndividualFolder = fullfile(processedImagesFolder, '6_v50backup_dF_plots_trials');
-plotsAveragedFolder = fullfile(processedImagesFolder, '6_v50backup_dF_plots_averaged');
+dF_grouped_folder = fullfile(processedImagesFolder, '6_v50_dF_F');
+plotsIndividualFolder = fullfile(processedImagesFolder, '6_v50_dF_plots_trials');
+plotsAveragedFolder = fullfile(processedImagesFolder, '6_v50_dF_plots_averaged');
 createDirectoriesIfNeeded({dF_grouped_folder, plotsIndividualFolder, plotsAveragedFolder});
 
 % Get all Excel files with validation
@@ -134,7 +120,7 @@ logBuffer{end+1} = sprintf('Input folder: %s', rawMeanFolder);
 logBuffer{end+1} = sprintf('Output folder: %s', dF_grouped_folder);
 
 %% Initialize  logging and timing
-logFileName = fullfile(processedImagesFolder, '6_grouped_processing_log_v50backup.txt');
+logFileName = fullfile(processedImagesFolder, '6_grouped_processing_log_v50.txt');
 globalTimer = tic;
 
 %% Step 1: File organization with  validation
@@ -317,7 +303,7 @@ function [groupedFiles, groupKeys] = organizeFilesByGroup(excelFiles, rawMeanFol
     for i = 1:numFiles
         try
             filename = excelFiles(i).name;
-            groupKey = utils.extractGroupKey(filename);
+            groupKey = extractGroupKey(filename);
             
             if ~isempty(groupKey)
                 if isKey(groupMap, groupKey)
@@ -572,20 +558,25 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     timeData_ms = single((0:(size(numericData, 1)-1))' * 5); % Convert to time (ms): 5ms per frame
     
     % OPTIMIZED dF/F calculations with INDIVIDUAL thresholds 
-    [dF_values, thresholds, gpuUsed] = calc.calculate(numericData, hasGPU, gpuInfo);
+    [dF_values, thresholds, gpuUsed] = calculate_dF_F(numericData, hasGPU, gpuInfo);
     
     % APPLY FILTERING - keep only ROIs that pass individual thresholds
     % Determine if this is PPF data and use appropriate filtering
     isPPF = contains(fileInfo.name, 'PPF');
     
     if isPPF
-        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
-            filter.filterROIs(dF_values, validHeaders, thresholds, 'PPF', timepoint_ms);
+        % Extract timepoint for PPF filtering
+        ppfMatch = regexp(fileInfo.name, 'PPF-(\d+)ms', 'tokens');
+        if ~isempty(ppfMatch)
+            timepoint_ms = str2double(ppfMatch{1}{1});
+            [finalDFValues, finalHeaders, finalThresholds] = filterValidROIsAdaptive(dF_values, validHeaders, thresholds, 'PPF', timepoint_ms);
+        else
+            [finalDFValues, finalHeaders, finalThresholds] = filterValidROIsAdaptive(dF_values, validHeaders, thresholds);
+        end
     else
-        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
-            filter.filterROIs(dF_values, validHeaders, thresholds, '1AP');
+        % Standard 1AP filtering
+        [finalDFValues, finalHeaders, finalThresholds] = filterValidROIsAdaptive(dF_values, validHeaders, thresholds);
     end
-    fprintf('    %s\n', filterStats.summary);
     
     % Prepare output structures with single precision
     data = struct();
@@ -593,7 +584,7 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     data.dF_values = finalDFValues;
     data.roiNames = finalHeaders;
     data.thresholds = finalThresholds;
-    data.stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS; % 267 frames × 5ms = 1335ms
+    data.stimulusTime_ms = 1335; % 267 frames × 5ms = 1335ms
     data.gpuUsed = gpuUsed;
     
     metadata = struct();
@@ -692,7 +683,7 @@ function [dF_values, thresholds, gpuUsed] = calculate_dF_F(traces, hasGPU, gpuIn
     % Renamed from calculate_dF_F
     % (Function content remains the same - just renamed)
     
-    baseline_window = cfg.timing.BASELINE_FRAMES;
+    baseline_window = 1:250;  % 250 frames = 1250ms baseline
     [n_frames, n_rois] = size(traces);
     gpuUsed = false;
     
@@ -1515,7 +1506,7 @@ function saveGroupedExcel(organizedData, averagedData, roiInfo, groupKey, output
     % Updated Excel saving with noise-based sheets and total averages
     
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
-    filename = [cleanGroupKey '_grouped_v50backup.xlsx'];
+    filename = [cleanGroupKey '_grouped_v50.xlsx'];
     filepath = fullfile(outputFolder, filename);
     
     % Delete existing file
@@ -2354,7 +2345,7 @@ function generateTotalAveragePlots1AP(totalAveragedData, roiInfo, groupKey, plot
     
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
     timeData_ms = totalAveragedData.Frame;
-    stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS;
+    stimulusTime_ms = 1335;
     
     % Get column names (skip Frame)
     varNames = totalAveragedData.Properties.VariableNames(2:end);
@@ -2600,7 +2591,7 @@ function generateGroupPlots1AP(organizedData, averagedData, roiInfo, groupKey, p
     
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
     timeData_ms = organizedData.Frame;
-    stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS;
+    stimulusTime_ms = 1335;
     
     %  color schemes for trials (consistent mapping)
     trialColors = [

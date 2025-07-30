@@ -17,8 +17,6 @@ function controller = pipeline_controller()
     controller.detectSystemCapabilities = @detectSystemCapabilities; 
 end
 
-
-
 function runMainPipeline()
     % Main pipeline entry point - replaces the monolithic script
     
@@ -39,7 +37,7 @@ function runMainPipeline()
         
         % Step 1: System setup and capability detection
         fprintf('\n--- STEP 1: System Setup ---\n');
-        [hasParallel, hasGPU, gpuInfo, poolObj] = setupSystemCapabilities(modules.config);
+        [hasParallelToolbox, hasGPU, gpuInfo, poolObj] = setupSystemCapabilities(modules.config);
         logBuffer = [logBuffer, logSystemInfo(hasParallelToolbox, hasGPU, gpuInfo)];
         
         % Step 2: File selection and validation
@@ -95,7 +93,7 @@ function runMainPipeline()
         % Save error log
         if exist('logBuffer', 'var')
             logBuffer{end+1} = sprintf('PIPELINE ERROR: %s', ME.message);
-            if exist('rawMeanFolder', 'var')
+            if exist('rawMeanFolder', 'var') && exist('modules', 'var')
                 errorLogFile = fullfile(fileparts(rawMeanFolder), 'error_log_v50.txt');
                 modules.io.saveLog(logBuffer, errorLogFile);
                 fprintf('Error log saved to: %s\n', errorLogFile);
@@ -143,18 +141,19 @@ function [hasParallelToolbox, hasGPU, gpuInfo, poolObj] = setupSystemCapabilitie
     poolObj = [];
     if hasParallelToolbox
         poolObj = setupParallelPool(hasGPU, gpuInfo);
-    end
-
+        
+        % Configure GPU on workers if available
         if hasGPU && ~isempty(poolObj)
-        try
-            spmd
-                if gpuDeviceCount > 0
-                    gpuDevice(1); % Use first GPU
+            try
+                spmd
+                    if gpuDeviceCount > 0
+                        gpuDevice(1); % Use first GPU
+                    end
                 end
+                fprintf('GPU configuration completed on all workers\n');
+            catch ME
+                fprintf('Warning: GPU configuration on workers failed: %s\n', ME.message);
             end
-            fprintf('GPU configuration completed on all workers\n');
-        catch ME
-            fprintf('Warning: GPU configuration on workers failed: %s\n', ME.message);
         end
     end
 end
@@ -177,20 +176,6 @@ function poolObj = setupParallelPool(hasGPU, gpuInfo)
         
         fprintf('Started parallel pool with %d workers\n', poolObj.NumWorkers);
         
-        % Configure GPU on workers if available
-        if hasGPU
-            try
-                spmd
-                    if gpuDeviceCount > 0
-                        gpuDevice(1);
-                    end
-                end
-                fprintf('GPU configuration completed on all workers\n');
-            catch ME
-                fprintf('GPU configuration on workers failed: %s\n', ME.message);
-            end
-        end
-        
     catch ME
         fprintf('Could not start parallel pool: %s\n', ME.message);
         poolObj = [];
@@ -198,7 +183,10 @@ function poolObj = setupParallelPool(hasGPU, gpuInfo)
 end
 
 function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
-    % Setup file system and validate inputs
+    % ==================== VERSION CONTROL ====================
+    % CHANGE THIS NUMBER TO UPDATE ALL FOLDER NAMES
+    VERSION = '51';  % <-- CHANGE THIS NUMBER HERE
+    % ==========================================================
     
     % Default directory (can be customized)
     defaultDir = 'D:\Data\GluSnFR\Ms\2025-06-17_Ms-Hipp_DIV13_Doc2b_pilot_resave\iglu3fast_NGR\';
@@ -210,12 +198,12 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
         error('No folder selected. Pipeline cancelled.');
     end
     
-    % Create output folders
+    % Create output folders with version variable
     processedImagesFolder = fileparts(rawMeanFolder);
     outputFolders = struct();
-    outputFolders.main = fullfile(processedImagesFolder, '6_v50_modular_dF_F');
-    outputFolders.individual = fullfile(processedImagesFolder, '6_v50_modular_plots_trials');
-    outputFolders.averaged = fullfile(processedImagesFolder, '6_v50_modular_plots_averaged');
+    outputFolders.main = fullfile(processedImagesFolder, sprintf('6_v%s_modular_dF_F', VERSION));
+    outputFolders.individual = fullfile(processedImagesFolder, sprintf('6_v%s_modular_plots_trials', VERSION));
+    outputFolders.averaged = fullfile(processedImagesFolder, sprintf('6_v%s_modular_plots_averaged', VERSION));
     
     % Create directories
     io.createDirectories({outputFolders.main, outputFolders.individual, outputFolders.averaged});
@@ -227,14 +215,13 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
         error('No valid Excel files found in: %s', rawMeanFolder);
     end
     
+    fprintf('Using version: v%s\n', VERSION);
     fprintf('Input folder: %s\n', rawMeanFolder);
     fprintf('Output folder: %s\n', outputFolders.main);
 end
 
-
 function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMatrix, hasGPU, gpuInfo)
-    % MOVE THIS from experiment_analyzer.m to pipeline_controller.m
-    % Current location causes circular dependency
+    % Process a single file with modular components
     
     fullFilePath = fullfile(fileInfo.folder, fileInfo.name);
     fprintf('    Processing: %s\n', fileInfo.name);
@@ -316,7 +303,7 @@ end
 
 function [groupResults, groupTimes] = processAllGroups(groupedFiles, groupKeys, rawMeanFolder, ...
                                                       outputFolders, hasParallelToolbox, hasGPU, gpuInfo, modules)
-    % Process all groups with optimal parallelization - FIXED MODULE PASSING
+    % Process all groups with optimal parallelization
     
     numGroups = length(groupKeys);
     groupResults = cell(numGroups, 1);
@@ -328,7 +315,7 @@ function [groupResults, groupTimes] = processAllGroups(groupedFiles, groupKeys, 
     if useParallel
         fprintf('Processing %d groups in parallel\n', numGroups);
         
-        % FIXED: Pass modules as constant to avoid reloading in parfor
+        % Pass modules as constant to avoid reloading in parfor
         modulesConstant = parallel.pool.Constant(modules);
         
         parfor groupIdx = 1:numGroups
@@ -350,7 +337,7 @@ end
 
 function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGroup, ...
                                                rawMeanFolder, outputFolders, hasGPU, gpuInfo, modules)
-    % Process a single group - FIXED: Use passed modules correctly
+    % Process a single group
     
     groupTimer = tic;
     result = struct('status', 'processing', 'groupKey', groupKey, 'numFiles', length(filesInGroup));
@@ -393,7 +380,7 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
 end
 
 function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules, hasGPU, gpuInfo)
-    % FIXED: Process all files in a group with proper module usage
+    % Process all files in a group with proper module usage
     
     numFiles = length(filesInGroup);
     groupData = cell(numFiles, 1);
@@ -477,200 +464,6 @@ function result = prepareGroupResult(groupData, groupMetadata, roiInfo, status)
     result.gpuUsed = gpuUsed;
 end
 
-function saveGroupResults(organizedData, averagedData, roiInfo, groupKey, outputFolders, modules)
-    % Save all group results (Excel + metadata)
-    
-    cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
-    filename = [cleanGroupKey '_grouped_v50_modular.xlsx'];
-    filepath = fullfile(outputFolders.main, filename);
-    
-    % Delete existing file
-    if exist(filepath, 'file')
-        delete(filepath);
-    end
-    
-    try
-        % Save organized data sheets
-        if strcmp(roiInfo.experimentType, 'PPF')
-            savePPFResults(organizedData, averagedData, roiInfo, filepath, modules);
-        else
-            save1APResults(organizedData, averagedData, roiInfo, filepath, modules);
-        end
-        
-        % Generate and save metadata
-        modules.analysis.generateMetadata(organizedData, roiInfo, filepath);
-        
-        fprintf('    Saved Excel file: %s\n', filename);
-        
-    catch ME
-        fprintf('    ERROR saving results for %s: %s\n', groupKey, ME.message);
-        rethrow(ME);
-    end
-end
-
-function savePPFResults(organizedData, averagedData, roiInfo, filepath, modules)
-    % Save PPF-specific results
-    
-    % All data sheet
-    writeTableWithHeaders(organizedData, filepath, 'All_Data', modules.io, roiInfo, true);
-    
-    % Averaged data sheet
-    writeTableWithHeaders(averagedData, filepath, 'Averaged', modules.io, roiInfo, false);
-end
-
-function save1APResults(organizedData, averagedData, roiInfo, filepath, modules)
-    % Save 1AP-specific results with noise-based sheets
-    
-    % Separate by noise level
-    [lowNoiseData, highNoiseData] = separateByNoiseLevel(organizedData, roiInfo);
-    
-    % Write noise-based sheets
-    if width(lowNoiseData) > 1
-        writeTableWithHeaders(lowNoiseData, filepath, 'Low_noise', modules.io, roiInfo, true);
-    end
-    
-    if width(highNoiseData) > 1
-        writeTableWithHeaders(highNoiseData, filepath, 'High_noise', modules.io, roiInfo, true);
-    end
-    
-    % Write averaged sheets
-    writeTableWithHeaders(averagedData.roi, filepath, 'ROI_Average', modules.io, roiInfo, false);
-    writeTableWithHeaders(averagedData.total, filepath, 'Total_Average', modules.io, roiInfo, false);
-end
-
-function [lowNoiseData, highNoiseData] = separateByNoiseLevel(organizedData, roiInfo)
-    % Separate data by noise level for 1AP experiments
-    
-    varNames = organizedData.Properties.VariableNames;
-    lowNoiseCols = {'Frame'};
-    highNoiseCols = {'Frame'};
-    
-    for i = 2:length(varNames)
-        colName = varNames{i};
-        roiMatch = regexp(colName, 'ROI(\d+)_T', 'tokens');
-        
-        if ~isempty(roiMatch)
-            roiNum = str2double(roiMatch{1}{1});
-            
-            if isKey(roiInfo.roiNoiseMap, roiNum)
-                noiseLevel = roiInfo.roiNoiseMap(roiNum);
-                
-                if strcmp(noiseLevel, 'low')
-                    lowNoiseCols{end+1} = colName;
-                elseif strcmp(noiseLevel, 'high')
-                    highNoiseCols{end+1} = colName;
-                end
-            end
-        end
-    end
-    
-    lowNoiseData = organizedData(:, lowNoiseCols);
-    highNoiseData = organizedData(:, highNoiseCols);
-end
-
-function writeTableWithHeaders(dataTable, filepath, sheetName, io, roiInfo, isTrialData)
-    % Write table with appropriate headers based on experiment type
-    
-    if width(dataTable) <= 1 % Only Frame column
-        return;
-    end
-    
-    if strcmp(roiInfo.experimentType, 'PPF')
-        [row1, row2] = createPPFHeaders(dataTable, roiInfo, isTrialData);
-    else
-        [row1, row2] = create1APHeaders(dataTable, roiInfo, isTrialData);
-    end
-    
-    io.writeExcelWithHeaders(dataTable, filepath, sheetName, row1, row2);
-end
-
-function [row1, row2] = createPPFHeaders(dataTable, roiInfo, isTrialData)
-    % Create headers for PPF data
-    
-    varNames = dataTable.Properties.VariableNames;
-    row1 = cell(1, length(varNames));
-    row2 = cell(1, length(varNames));
-    
-    % First column
-    row1{1} = sprintf('%dms', roiInfo.timepoint);
-    row2{1} = 'Time (ms)';
-    
-    % Process other columns
-    for i = 2:length(varNames)
-        varName = varNames{i};
-        
-        if isTrialData
-            % Format: Cs1-c2_ROI3
-            roiMatch = regexp(varName, '(Cs\d+-c\d+)_ROI(\d+)', 'tokens');
-            if ~isempty(roiMatch)
-                row1{i} = roiMatch{1}{1};  % Cs1-c2
-                row2{i} = sprintf('ROI %s', roiMatch{1}{2});  % ROI 3
-            end
-        else
-            % Format: Cs1-c2_n24
-            roiMatch = regexp(varName, '(Cs\d+-c\d+)_n(\d+)', 'tokens');
-            if ~isempty(roiMatch)
-                row1{i} = roiMatch{1}{2};  % 24
-                row2{i} = roiMatch{1}{1};  % Cs1-c2
-            end
-        end
-    end
-end
-
-function [row1, row2] = create1APHeaders(dataTable, roiInfo, isTrialData)
-    % Create headers for 1AP data
-    
-    varNames = dataTable.Properties.VariableNames;
-    row1 = cell(1, length(varNames));
-    row2 = cell(1, length(varNames));
-    
-    % First column
-    if isTrialData
-        row1{1} = 'Trial';
-        row2{1} = 'Time (ms)';
-    else
-        row1{1} = 'n';
-        row2{1} = 'Time (ms)';
-    end
-    
-    % Process other columns
-    for i = 2:length(varNames)
-        varName = varNames{i};
-        
-        if isTrialData
-            % Format: ROI123_T5
-            roiMatch = regexp(varName, 'ROI(\d+)_T(\d+)', 'tokens');
-            if ~isempty(roiMatch)
-                row1{i} = roiMatch{1}{2};  % Trial number
-                row2{i} = sprintf('ROI %s', roiMatch{1}{1});  % ROI number
-            end
-        else
-            % Format: ROI123_n5 or Low_Noise_n15
-            if contains(varName, 'ROI')
-                roiMatch = regexp(varName, 'ROI(\d+)_n(\d+)', 'tokens');
-                if ~isempty(roiMatch)
-                    row1{i} = roiMatch{1}{2};  % n count
-                    row2{i} = sprintf('ROI %s', roiMatch{1}{1});  % ROI number
-                end
-            else
-                % Total averages
-                nMatch = regexp(varName, 'n(\d+)', 'tokens');
-                if ~isempty(nMatch)
-                    row1{i} = nMatch{1}{1};  % n count
-                    if contains(varName, 'Low_Noise')
-                        row2{i} = 'Low Noise';
-                    elseif contains(varName, 'High_Noise')
-                        row2{i} = 'High Noise';
-                    else
-                        row2{i} = 'All';
-                    end
-                end
-            end
-        end
-    end
-end
-
-
 function logEntries = logSystemInfo(hasParallelToolbox, hasGPU, gpuInfo)
     % Create system info log entries
     
@@ -721,8 +514,11 @@ function [hasParallelToolbox, hasGPU, gpuInfo] = detectSystemCapabilities()
     end
 end
 
-function controller = addSystemDetection(controller)
-    % Add the detectSystemCapabilities function to the controller
-    controller.detectSystemCapabilities = @detectSystemCapabilities;
+% Placeholder functions for missing functionality
+function saveAllResults(varargin)
+    warning('saveAllResults not yet implemented');
 end
 
+function generateAllPlots(varargin)
+    warning('generateAllPlots not yet implemented');
+end

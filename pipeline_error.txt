@@ -1,0 +1,8 @@
+GluSnFR Pipeline Error Report
+Time: 29-Jul-2025 20:29:50
+Error: No valid Excel files found in: D:\Data\GluSnFR\Ms\2025-06-17_Ms-Hipp_DIV13_Doc2b_pilot_resave\iglu3fast_NGR\1AP\GPU_Processed_Images_1AP\5_raw_mean
+
+Stack Trace:
+  setupFileSystem (line 215)
+  runMainPipeline (line 45)
+  main_glusnfr_pipeline (line 30)
