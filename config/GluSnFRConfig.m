@@ -6,7 +6,7 @@ function config = GluSnFRConfig()
     % the code more maintainable.
     
     %% Version Info
-    config.version = '50';
+    config.version = '52';
     config.created = datestr(now, 'yyyy-mm-dd');
     
     %% Timing Parameters (Previously scattered as magic numbers)
@@ -15,8 +15,8 @@ function config = GluSnFRConfig()
     config.timing.MS_PER_FRAME = 5;
     config.timing.STIMULUS_FRAME = 267;
     config.timing.STIMULUS_TIME_MS = 1335; % 267 * 5ms
-    config.timing.BASELINE_FRAMES = 1:250;
-    config.timing.POST_STIMULUS_WINDOW = 50; % 250ms
+    config.timing.BASELINE_FRAMES = 1:200;
+    config.timing.POST_STIMULUS_WINDOW = 30; % 150ms
     
     %% Threshold Parameters  
     config.thresholds = struct();
@@ -37,7 +37,7 @@ function config = GluSnFRConfig()
     config.plotting = struct();
     config.plotting.MAX_PLOTS_PER_FIGURE = 12;
     config.plotting.DPI = 300;
-    config.plotting.Y_LIMITS = [-0.02, 0.1];
+    config.plotting.Y_LIMITS = [-0.02, 0.08];
     config.plotting.TRANSPARENCY = 0.7;
     
     %% Colors
