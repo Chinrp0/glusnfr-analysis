@@ -1,7 +1,7 @@
 GluSnFR Pipeline Error Report
-Time: 30-Jul-2025 11:04:01
-Error: Too many output arguments.
+Time: 30-Jul-2025 11:53:24
+Error: Unrecognized field name "createResultsSummary".
 
 Stack Trace:
-  runMainPipeline (line 45)
+  runMainPipeline (line 67)
   main_glusnfr_pipeline (line 27)

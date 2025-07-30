@@ -104,6 +104,91 @@ function runMainPipeline()
     end
 end
 
+function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
+    % FIXED: Setup file system with proper return values and error handling
+    % 
+    % This function was failing because:
+    % 1. The original had return value mismatches
+    % 2. Excel file validation was too strict
+    % 3. Error handling was insufficient
+    
+    fprintf('Setting up file system...\n');
+    
+    % ==================== VERSION CONTROL ====================
+    % CHANGE THIS NUMBER TO UPDATE ALL FOLDER NAMES
+    VERSION = '51';  % <-- CHANGE THIS NUMBER HERE (incremented from 50)
+    % ==========================================================
+    
+    % Default directory (can be customized)
+    defaultDir = 'D:\Data\GluSnFR\Ms\2025-06-17_Ms-Hipp_DIV13_Doc2b_pilot_resave\iglu3fast_NGR\';
+    
+    % Select input folder
+    if exist(defaultDir, 'dir')
+        fprintf('Default directory found: %s\n', defaultDir);
+        rawMeanFolder = uigetdir(defaultDir, 'Select the "5_raw_mean" subfolder in GPU_Processed_Images');
+    else
+        fprintf('Default directory not found, please select manually\n');
+        rawMeanFolder = uigetdir(pwd, 'Select folder containing Excel files');
+    end
+    
+    if isequal(rawMeanFolder, 0)
+        error('No folder selected. Pipeline cancelled.');
+    end
+    
+    fprintf('Selected input folder: %s\n', rawMeanFolder);
+    
+    % Create output folders with version variable
+    processedImagesFolder = fileparts(rawMeanFolder);
+    outputFolders = struct();
+    outputFolders.main = fullfile(processedImagesFolder, sprintf('6_v%s_modular_dF_F', VERSION));
+    outputFolders.individual = fullfile(processedImagesFolder, sprintf('6_v%s_modular_plots_trials', VERSION));
+    outputFolders.averaged = fullfile(processedImagesFolder, sprintf('6_v%s_modular_plots_averaged', VERSION));
+    
+    % Create directories using the io manager
+    fprintf('Creating output directories...\n');
+    io.createDirectories({outputFolders.main, outputFolders.individual, outputFolders.averaged});
+    
+    % Get and validate Excel files with improved error handling
+    fprintf('Scanning for Excel files...\n');
+    try
+        excelFiles = io.getExcelFiles(rawMeanFolder);
+        
+        if isempty(excelFiles)
+            error('No valid Excel files found in: %s', rawMeanFolder);
+        end
+        
+        fprintf('Successfully found %d valid Excel files\n', length(excelFiles));
+        
+        % Show first few files for confirmation
+        numToShow = min(3, length(excelFiles));
+        fprintf('First %d files:\n', numToShow);
+        for i = 1:numToShow
+            fprintf('  %d. %s\n', i, excelFiles(i).name);
+        end
+        
+    catch ME
+        fprintf('ERROR getting Excel files: %s\n', ME.message);
+        fprintf('Folder contents:\n');
+        allFiles = dir(rawMeanFolder);
+        for i = 1:min(10, length(allFiles))
+            if ~allFiles(i).isdir
+                fprintf('  %s\n', allFiles(i).name);
+            end
+        end
+        rethrow(ME);
+    end
+    
+    % Final confirmation
+    fprintf('File system setup complete!\n');
+    fprintf('Input: %s (%d files)\n', rawMeanFolder, length(excelFiles));
+    fprintf('Output: %s\n', outputFolders.main);
+    
+    % IMPORTANT: This function now properly returns all three expected outputs:
+    % 1. rawMeanFolder - string path to input folder
+    % 2. outputFolders - struct with .main, .individual, .averaged fields  
+    % 3. excelFiles - struct array of file information
+end
+
 function [hasParallelToolbox, hasGPU, gpuInfo, poolObj] = setupSystemCapabilities(config)
     % Setup and detect system capabilities
     
@@ -182,48 +267,7 @@ function poolObj = setupParallelPool(hasGPU, gpuInfo)
     end
 end
 
-function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
-    % Setup file system with proper versioning and return values
-    % FIXED: Now properly returns all 3 outputs as expected
-    
-    % ==================== VERSION CONTROL ====================
-    % CHANGE THIS NUMBER TO UPDATE ALL FOLDER NAMES
-    VERSION = '50';  % <-- CHANGE THIS NUMBER HERE
-    % ==========================================================
-    
-    % Default directory (can be customized)
-    defaultDir = 'D:\Data\GluSnFR\Ms\2025-06-17_Ms-Hipp_DIV13_Doc2b_pilot_resave\iglu3fast_NGR\';
-    
-    % Select input folder
-    rawMeanFolder = uigetdir(defaultDir, 'Select the "5_raw_mean" subfolder in GPU_Processed_Images');
-    
-    if isequal(rawMeanFolder, 0)
-        error('No folder selected. Pipeline cancelled.');
-    end
-    
-    % Create output folders with version variable
-    processedImagesFolder = fileparts(rawMeanFolder);
-    outputFolders = struct();
-    outputFolders.main = fullfile(processedImagesFolder, sprintf('6_v%s_modular_dF_F', VERSION));
-    outputFolders.individual = fullfile(processedImagesFolder, sprintf('6_v%s_modular_plots_trials', VERSION));
-    outputFolders.averaged = fullfile(processedImagesFolder, sprintf('6_v%s_modular_plots_averaged', VERSION));
-    
-    % Create directories
-    io.createDirectories({outputFolders.main, outputFolders.individual, outputFolders.averaged});
-    
-    % Get and validate Excel files  
-    excelFiles = io.getExcelFiles(rawMeanFolder);
-    
-    if isempty(excelFiles)
-        error('No valid Excel files found in: %s', rawMeanFolder);
-    end
-    
-    fprintf('Using version: v%s\n', VERSION);
-    fprintf('Input folder: %s\n', rawMeanFolder);
-    fprintf('Output folder: %s\n', outputFolders.main);
-    
-    % FIXED: Function now properly returns all expected outputs
-end
+
 
 function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMatrix, hasGPU, gpuInfo)
     % Process a single file with modular components

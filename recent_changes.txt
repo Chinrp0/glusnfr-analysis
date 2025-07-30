@@ -1,0 +1,10 @@
+e111b66 Fix: Resolve setupFileSystem function signature mismatch
+d16cd27 fix: Add missing functions
+582d4ce fix: Add missing functions and resolve circular dependencies
+0ce0d50 feat: Initial release of modular GluSnFR analysis pipeline v50
+d8374e4 feat: Modularize GluSnFR analysis pipeline from monolithic script
+c824d67 Descriptive message
+8d52997 Complete modular conversion - v50 to organized modules
+2b4a0aa added new core modules
+425f95d Add new processing modules and tests
+fe386c1 Update CHANGELOG.md
