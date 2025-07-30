@@ -64,8 +64,9 @@ function runMainPipeline()
         % Step 5: Results analysis and summary
         fprintf('\n--- STEP 5: Results Analysis ---\n');
         step5Timer = tic;
-        summary = modules.analysis.createResultsSummary(groupResults, groupTimes, toc(globalTimer));
-        modules.analysis.validateExperimentResults(groupResults);
+        % FIX: Change from createResultsSummary to createSummary
+        summary = modules.analysis.createSummary(groupResults, groupTimes, toc(globalTimer));
+        modules.analysis.validateResults(groupResults);
         step5Time = toc(step5Timer);
         
         % Add summary to log
@@ -266,8 +267,6 @@ function poolObj = setupParallelPool(hasGPU, gpuInfo)
         poolObj = [];
     end
 end
-
-
 
 function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMatrix, hasGPU, gpuInfo)
     % Process a single file with modular components
