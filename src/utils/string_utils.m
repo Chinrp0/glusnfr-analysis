@@ -70,20 +70,31 @@ function groupKey = extractGroupKey(filename, config)
 end
 
 function roiNumbers = extractROINumbers(roiNames, config)
-    % Extract ROI numbers with cached pattern
+    % FIXED: Extract ROI numbers with robust fallback (matching monolithic version)
     
     numROIs = length(roiNames);
-    roiNumbers = NaN(numROIs, 1);
+    roiNumbers = NaN(numROIs, 1); % Preallocate for worst case
     validCount = 0;
     
     for i = 1:numROIs
         try
             roiName = char(roiNames{i});
             
-            % Use cached pattern from config
-            roiMatch = regexp(roiName, config.patterns.ROI_NAME, 'tokens', 'ignorecase', 'once');
+            % Primary pattern: ROI with optional separators (case insensitive)
+            roiMatch = regexp(roiName, 'roi[_\s]*(\d+)', 'tokens', 'ignorecase');
             if ~isempty(roiMatch)
-                roiNum = str2double(roiMatch{1});
+                roiNum = str2double(roiMatch{1}{1});
+                if isfinite(roiNum) && roiNum > 0 && roiNum <= 65535
+                    validCount = validCount + 1;
+                    roiNumbers(validCount) = roiNum;
+                    continue;
+                end
+            end
+            
+            % Fallback: find any number in the string (like monolithic version)
+            numMatch = regexp(roiName, '(\d+)', 'tokens');
+            if ~isempty(numMatch)
+                roiNum = str2double(numMatch{end}{1}); % Use last number found
                 if isfinite(roiNum) && roiNum > 0 && roiNum <= 65535
                     validCount = validCount + 1;
                     roiNumbers(validCount) = roiNum;

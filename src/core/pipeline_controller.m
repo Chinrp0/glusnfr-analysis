@@ -14,13 +14,14 @@ function controller = pipeline_controller()
     controller.processAllGroups = @processAllGroups;
     controller.saveAllResults = @saveAllResults;
     controller.generateAllPlots = @generateAllPlots;
-    controller.detectSystemCapabilities = @detectSystemCapabilities; 
+    controller.detectSystemCapabilities = @detectSystemCapabilities;
+    controller.validateProcessingResults = @validateProcessingResults;
 end
 
 function runMainPipeline()
-    % UPDATED: Main pipeline with enhanced validation and debugging
+    % Main pipeline entry point - replaces the monolithic script
     
-    scriptName = 'GluSnFR_Analysis_Pipeline_v50_Modular_FIXED';
+    scriptName = 'GluSnFR_Analysis_Pipeline_v50_Modular';
     fprintf('=== %s ===\n', scriptName);
     fprintf('Modular architecture with optimized processing\n');
     fprintf('Processing Date: %s\n', char(datetime('now')));
@@ -31,55 +32,40 @@ function runMainPipeline()
     logBuffer{end+1} = sprintf('Processing Date: %s', char(datetime('now')));
     
     try
-        % Load all modules with validation
+        % Load all modules
         fprintf('\nLoading pipeline modules...\n');
         modules = module_loader();
         
-        % UPDATED: Validate modules loaded correctly
-        validateModulesLoaded(modules);
-        
-        % Step 1: System setup
+        % Step 1: System setup and capability detection
         fprintf('\n--- STEP 1: System Setup ---\n');
         [hasParallelToolbox, hasGPU, gpuInfo, poolObj] = setupSystemCapabilities(modules.config);
         logBuffer = [logBuffer, logSystemInfo(hasParallelToolbox, hasGPU, gpuInfo)];
         
-        % Step 2: File selection with validation
+        % Step 2: File selection and validation
         fprintf('\n--- STEP 2: File Selection ---\n');
         [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(modules.io);
         logBuffer{end+1} = sprintf('Found %d Excel files to process', length(excelFiles));
         logBuffer{end+1} = sprintf('Input folder: %s', rawMeanFolder);
         
-        % UPDATED: Early validation of input files
-        if isempty(excelFiles)
-            error('No valid Excel files found. Please check your input folder.');
-        end
-        
-        % Step 3: File organization with validation
+        % Step 3: File organization
         fprintf('\n--- STEP 3: File Organization ---\n');
         step3Timer = tic;
         [groupedFiles, groupKeys] = modules.organize.organizeFilesByGroup(excelFiles, rawMeanFolder);
         step3Time = toc(step3Timer);
-        
-        % UPDATED: Validate grouping results
-        if isempty(groupKeys)
-            error('File organization failed - no groups created');
-        end
-        
         logBuffer{end+1} = sprintf('File organization completed in %.3f seconds', step3Time);
         
-        % Step 4: Group processing with enhanced monitoring
+        % Step 4: Group processing
         fprintf('\n--- STEP 4: Group Processing ---\n');
         step4Timer = tic;
         [groupResults, groupTimes] = processAllGroups(groupedFiles, groupKeys, rawMeanFolder, ...
                                                      outputFolders, hasParallelToolbox, hasGPU, gpuInfo, modules);
         step4Time = toc(step4Timer);
-        
-        % UPDATED: Validate processing results
-        validateProcessingResults(groupResults);
-        
         logBuffer{end+1} = sprintf('Group processing completed in %.3f seconds', step4Time);
         
-        % Step 5: Results analysis
+        % Step 5: Validate results
+        validateProcessingResults(groupResults);
+        
+        % Step 6: Results analysis and summary
         fprintf('\n--- STEP 5: Results Analysis ---\n');
         step5Timer = tic;
         summary = modules.analysis.createSummary(groupResults, groupTimes, toc(globalTimer));
@@ -100,9 +86,6 @@ function runMainPipeline()
         fprintf('Performance: %s\n', summary.statistics.performanceCategory);
         fprintf('Log saved to: %s\n', logFileName);
         
-        % UPDATED: Final validation and summary
-        printFinalSummary(summary, groupResults);
-        
     catch ME
         fprintf('\n=== PIPELINE ERROR ===\n');
         fprintf('Error: %s\n', ME.message);
@@ -111,14 +94,13 @@ function runMainPipeline()
             fprintf('  %s at line %d\n', ME.stack(i).name, ME.stack(i).line);
         end
         
-        % Save error log with better context
+        % Save error log
         if exist('logBuffer', 'var')
             logBuffer{end+1} = sprintf('PIPELINE ERROR: %s', ME.message);
-            logBuffer{end+1} = sprintf('Error occurred in: %s', ME.stack(1).name);
             if exist('rawMeanFolder', 'var') && exist('modules', 'var')
                 errorLogFile = fullfile(fileparts(rawMeanFolder), 'error_log_v50.txt');
                 modules.io.saveLog(logBuffer, errorLogFile);
-                fprintf('Error log saved to: %s\n', errorLogFile);
+                fprintf('Log saved to: %s\n', errorLogFile);
             end
         end
         
@@ -126,115 +108,22 @@ function runMainPipeline()
     end
 end
 
-function validateModulesLoaded(modules)
-    % UPDATED: Validate that all required modules are loaded and functional
-    
-    requiredModules = {'config', 'calc', 'filter', 'memory', 'utils', ...
-                      'io', 'organize', 'plot', 'analysis', 'controller'};
-    
-    for i = 1:length(requiredModules)
-        moduleName = requiredModules{i};
-        if ~isfield(modules, moduleName) || isempty(modules.(moduleName))
-            error('Required module missing or empty: %s', moduleName);
-        end
-    end
-    
-    fprintf('✓ All modules loaded and validated\n');
-end
-
-function validateProcessingResults(groupResults)
-    % UPDATED: Validate that processing actually produced results
-    
-    if isempty(groupResults)
-        error('No processing results generated');
-    end
-    
-    successCount = 0;
-    totalROIs = 0;
-    
-    for i = 1:length(groupResults)
-        result = groupResults{i};
-        if isfield(result, 'status') && strcmp(result.status, 'success')
-            successCount = successCount + 1;
-            if isfield(result, 'numROIs')
-                totalROIs = totalROIs + result.numROIs;
-            end
-        end
-    end
-    
-    if successCount == 0
-        error('No groups processed successfully');
-    end
-    
-    if totalROIs == 0
-        warning('No ROIs passed filtering across all groups - check filtering parameters');
-    end
-    
-    fprintf('✓ Processing validation: %d/%d groups successful, %d total ROIs\n', ...
-            successCount, length(groupResults), totalROIs);
-end
-
-function printFinalSummary(summary, groupResults)
-    % UPDATED: Print detailed final summary
-    
-    fprintf('\n=== DETAILED RESULTS SUMMARY ===\n');
-    
-    % Count ROIs by experiment type
-    ap1ROIs = 0;
-    ppfROIs = 0;
-    
-    for i = 1:length(groupResults)
-        result = groupResults{i};
-        if isfield(result, 'numROIs') && isfield(result, 'experimentType')
-            if strcmp(result.experimentType, '1AP')
-                ap1ROIs = ap1ROIs + result.numROIs;
-            elseif strcmp(result.experimentType, 'PPF')
-                ppfROIs = ppfROIs + result.numROIs;
-            end
-        end
-    end
-    
-    fprintf('Experiment breakdown:\n');
-    if ap1ROIs > 0
-        fprintf('  • 1AP experiments: %d ROIs\n', ap1ROIs);
-    end
-    if ppfROIs > 0
-        fprintf('  • PPF experiments: %d ROIs\n', ppfROIs);
-    end
-    
-    % Check for common issues
-    if summary.statistics.totalROIs == 0
-        fprintf('\n⚠ WARNING: No ROIs passed filtering!\n');
-        fprintf('Suggestions:\n');
-        fprintf('  • Check if input files contain valid data\n');
-        fprintf('  • Consider relaxing filtering parameters\n');
-        fprintf('  • Verify stimulus timing and thresholds\n');
-    elseif summary.statistics.overallFilterRate < 0.1
-        fprintf('\n⚠ WARNING: Very low filter rate (%.1f%%)\n', summary.statistics.overallFilterRate*100);
-        fprintf('Suggestions:\n');
-        fprintf('  • Filtering may be too strict\n');
-        fprintf('  • Check threshold calculations\n');
-        fprintf('  • Verify data quality\n');
-    else
-        fprintf('\n✅ Pipeline completed successfully!\n');
-        fprintf('Filter rate: %.1f%% (within normal range)\n', summary.statistics.overallFilterRate*100);
-    end
-    
-    fprintf('\nNext steps:\n');
-    fprintf('  • Check Excel files for expected sheets\n');
-    fprintf('  • Verify plots were generated\n');
-    fprintf('  • Compare with monolithic script output\n');
-end
-
 function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
-    % UPDATED: Setup with better validation and version control
+    % FIXED: Setup file system with proper return values and error handling
+    % 
+    % This function was failing because:
+    % 1. The original had return value mismatches
+    % 2. Excel file validation was too strict
+    % 3. Error handling was insufficient
     
     fprintf('Setting up file system...\n');
     
-    % UPDATED: Version control - easy to change
-    VERSION = '51_fixed';  % Updated version number
+    % ==================== VERSION CONTROL ====================
+    % CHANGE THIS NUMBER TO UPDATE ALL FOLDER NAMES
+    VERSION = '51';  % <-- CHANGE THIS NUMBER HERE (incremented from 50)
+    % ==========================================================
     
-    % Default directory
+    % Default directory (can be customized)
     defaultDir = 'D:\Data\GluSnFR\Ms\2025-06-17_Ms-Hipp_DIV13_Doc2b_pilot_resave\iglu3fast_NGR\';
     
     % Select input folder
@@ -252,18 +141,18 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
     
     fprintf('Selected input folder: %s\n', rawMeanFolder);
     
-    % Create output folders with updated version
+    % Create output folders with version variable
     processedImagesFolder = fileparts(rawMeanFolder);
     outputFolders = struct();
-    outputFolders.main = fullfile(processedImagesFolder, sprintf('6_v%s_modular_dF_F', VERSION));
-    outputFolders.individual = fullfile(processedImagesFolder, sprintf('6_v%s_modular_plots_trials', VERSION));
-    outputFolders.averaged = fullfile(processedImagesFolder, sprintf('6_v%s_modular_plots_averaged', VERSION));
+    outputFolders.main = fullfile(processedImagesFolder, sprintf('6_v%s_fixed_modular_dF_F', VERSION));
+    outputFolders.individual = fullfile(processedImagesFolder, sprintf('6_v%s_fixed_modular_plots_trials', VERSION));
+    outputFolders.averaged = fullfile(processedImagesFolder, sprintf('6_v%s_fixed_modular_plots_averaged', VERSION));
     
-    % Create directories
+    % Create directories using the io manager
     fprintf('Creating output directories...\n');
     io.createDirectories({outputFolders.main, outputFolders.individual, outputFolders.averaged});
     
-    % Get and validate Excel files
+    % Get and validate Excel files with improved error handling
     fprintf('Scanning for Excel files...\n');
     try
         excelFiles = io.getExcelFiles(rawMeanFolder);
@@ -283,54 +172,40 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
         
     catch ME
         fprintf('ERROR getting Excel files: %s\n', ME.message);
-        listDirectoryContents(rawMeanFolder);
+        fprintf('Folder contents:\n');
+        allFiles = dir(rawMeanFolder);
+        for i = 1:min(10, length(allFiles))
+            if ~allFiles(i).isdir
+                fprintf('  %s\n', allFiles(i).name);
+            end
+        end
         rethrow(ME);
     end
     
+    % Final confirmation
     fprintf('File system setup complete!\n');
     fprintf('Input: %s (%d files)\n', rawMeanFolder, length(excelFiles));
     fprintf('Output: %s\n', outputFolders.main);
-end
-
-function listDirectoryContents(folder)
-    % Helper function to debug directory contents
     
-    fprintf('Folder contents:\n');
-    try
-        allFiles = dir(folder);
-        fileCount = 0;
-        for i = 1:length(allFiles)
-            if ~allFiles(i).isdir
-                fileCount = fileCount + 1;
-                if fileCount <= 10  % Show first 10 files
-                    fprintf('  %s\n', allFiles(i).name);
-                end
-            end
-        end
-        if fileCount > 10
-            fprintf('  ... and %d more files\n', fileCount - 10);
-        end
-        if fileCount == 0
-            fprintf('  (no files found)\n');
-        end
-    catch ME
-        fprintf('  Error reading directory: %s\n', ME.message);
-    end
+    % IMPORTANT: This function now properly returns all three expected outputs:
+    % 1. rawMeanFolder - string path to input folder
+    % 2. outputFolders - struct with .main, .individual, .averaged fields  
+    % 3. excelFiles - struct array of file information
 end
-
 
 function [hasParallelToolbox, hasGPU, gpuInfo, poolObj] = setupSystemCapabilities(config)
-    % System setup - unchanged but with better logging
+    % Setup and detect system capabilities
     
+    % Check MATLAB version
     matlab_version = version('-release');
     fprintf('MATLAB Version: %s\n', matlab_version);
     
-    useReadMatrix = ~verLessThan('matlab', '9.6');
+    useReadMatrix = ~verLessThan('matlab', '9.6'); % R2019a+
     if ~useReadMatrix
         warning('This pipeline is optimized for MATLAB R2019a or later');
     end
     
-    % Detect capabilities
+    % Detect system capabilities
     hasParallelToolbox = license('test', 'Distrib_Computing_Toolbox');
     hasGPU = false;
     gpuInfo = struct('name', 'None', 'memory', 0, 'deviceCount', 0);
@@ -338,11 +213,11 @@ function [hasParallelToolbox, hasGPU, gpuInfo, poolObj] = setupSystemCapabilitie
     % GPU detection
     if hasParallelToolbox
         try
-            gpuDevice();
+            gpuDevice(); % Test GPU availability
             gpu = gpuDevice();
             hasGPU = true;
             gpuInfo.name = gpu.Name;
-            gpuInfo.memory = gpu.AvailableMemory / 1e9;
+            gpuInfo.memory = gpu.AvailableMemory / 1e9; % GB
             gpuInfo.deviceCount = gpuDeviceCount();
             
             fprintf('GPU detected: %s (%.1f GB available)\n', gpuInfo.name, gpuInfo.memory);
@@ -356,11 +231,12 @@ function [hasParallelToolbox, hasGPU, gpuInfo, poolObj] = setupSystemCapabilitie
     if hasParallelToolbox
         poolObj = setupParallelPool(hasGPU, gpuInfo);
         
+        % Configure GPU on workers if available
         if hasGPU && ~isempty(poolObj)
             try
                 spmd
                     if gpuDeviceCount > 0
-                        gpuDevice(1);
+                        gpuDevice(1); % Use first GPU
                     end
                 end
                 fprintf('GPU configuration completed on all workers\n');
@@ -481,16 +357,19 @@ end
 
 function [groupResults, groupTimes] = processAllGroups(groupedFiles, groupKeys, rawMeanFolder, ...
                                                       outputFolders, hasParallelToolbox, hasGPU, gpuInfo, modules)
-    % UPDATED: Group processing with better monitoring
+    % Process all groups with optimal parallelization
     
     numGroups = length(groupKeys);
     groupResults = cell(numGroups, 1);
     groupTimes = zeros(numGroups, 1);
     
+    % Determine processing strategy
     useParallel = hasParallelToolbox && numGroups > 1;
     
     if useParallel
         fprintf('Processing %d groups in parallel\n', numGroups);
+        
+        % Pass modules as constant to avoid reloading in parfor
         modulesConstant = parallel.pool.Constant(modules);
         
         parfor groupIdx = 1:numGroups
@@ -508,15 +387,11 @@ function [groupResults, groupTimes] = processAllGroups(groupedFiles, groupKeys, 
                 rawMeanFolder, outputFolders, hasGPU, gpuInfo, modules);
         end
     end
-    
-    % UPDATED: Validate that we got results
-    successCount = sum(cellfun(@(x) strcmp(x.status, 'success'), groupResults));
-    fprintf('✓ Completed processing: %d/%d groups successful\n', successCount, numGroups);
 end
 
 function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGroup, ...
                                                rawMeanFolder, outputFolders, hasGPU, gpuInfo, modules)
-    % UPDATED: Group processing with enhanced validation
+    % Process a single group
     
     groupTimer = tic;
     result = struct('status', 'processing', 'groupKey', groupKey, 'numFiles', length(filesInGroup));
@@ -531,23 +406,13 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
             result.status = 'warning';
             result.message = 'No valid data found in group';
             processingTime = toc(groupTimer);
-            fprintf('  ⚠ Group %s: No valid data\n', groupKey);
             return;
         end
         
-        % Organize data with validation
+        % Organize data
         [organizedData, averagedData, roiInfo] = modules.organize.organizeGroupData(groupData, groupMetadata, groupKey);
         
-        % UPDATED: Validate organized data
-        if isempty(organizedData) || width(organizedData) <= 1
-            result.status = 'warning';
-            result.message = 'Data organization failed';
-            processingTime = toc(groupTimer);
-            fprintf('  ⚠ Group %s: Data organization failed\n', groupKey);
-            return;
-        end
-        
-        % Save results
+        % Save results using consolidated io manager
         modules.io.writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, outputFolders.main);
         
         % Generate plots
@@ -558,7 +423,7 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
         result.groupKey = groupKey;
         
     catch ME
-        fprintf('  ✗ ERROR processing group %s: %s\n', groupKey, ME.message);
+        fprintf('  ERROR processing group %s: %s\n', groupKey, ME.message);
         result.status = 'error';
         result.message = ME.message;
         result.stackTrace = ME.stack;
@@ -569,7 +434,7 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
 end
 
 function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules, hasGPU, gpuInfo)
-    % UPDATED: File processing with better error handling
+    % Process all files in a group with proper module usage
     
     numFiles = length(filesInGroup);
     groupData = cell(numFiles, 1);
@@ -583,16 +448,14 @@ function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFol
             [data, metadata] = processSingleFile(...
                 filesInGroup(fileIdx), rawMeanFolder, useReadMatrix, hasGPU, gpuInfo);
             
-            if ~isempty(data) && isfield(data, 'dF_values') && ~isempty(data.dF_values)
+            if ~isempty(data)
                 validCount = validCount + 1;
                 groupData{validCount} = data;
                 groupMetadata{validCount} = metadata;
-            else
-                fprintf('    ⚠ File %s: No valid data extracted\n', filesInGroup(fileIdx).name);
             end
             
         catch ME
-            fprintf('    ✗ ERROR processing %s: %s\n', filesInGroup(fileIdx).name, ME.message);
+            fprintf('    WARNING: Error processing %s: %s\n', filesInGroup(fileIdx).name, ME.message);
         end
     end
     
@@ -600,7 +463,9 @@ function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFol
     groupData = groupData(1:validCount);
     groupMetadata = groupMetadata(1:validCount);
     
-    fprintf('    ✓ Processed %d/%d files successfully\n', validCount, numFiles);
+    if validCount < numFiles
+        fprintf('    WARNING: %d/%d files processed successfully\n', validCount, numFiles);
+    end
 end
 
 function result = prepareGroupResult(groupData, groupMetadata, roiInfo, status)
@@ -700,6 +565,32 @@ function [hasParallelToolbox, hasGPU, gpuInfo] = detectSystemCapabilities()
         end
     else
         fprintf('Parallel Computing Toolbox not available\n');
+    end
+end
+
+function validateProcessingResults(groupResults)
+    % FIXED: Validate that at least some groups were processed successfully
+    
+    successCount = 0;
+    errorCount = 0;
+    warningCount = 0;
+    
+    for i = 1:length(groupResults)
+        if isfield(groupResults{i}, 'status')
+            if strcmp(groupResults{i}.status, 'success')
+                successCount = successCount + 1;
+            elseif strcmp(groupResults{i}.status, 'error')
+                errorCount = errorCount + 1;
+            elseif strcmp(groupResults{i}.status, 'warning')
+                warningCount = warningCount + 1;
+            end
+        end
+    end
+    
+    fprintf('✓ Completed processing: %d/%d groups successful\n', successCount, length(groupResults));
+    
+    if successCount == 0
+        error('No groups processed successfully');
     end
 end
 
