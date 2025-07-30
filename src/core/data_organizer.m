@@ -11,7 +11,6 @@ function organizer = data_organizer()
     organizer.organizeGroupData = @organizeGroupData;
     organizer.createTrialMapping = @createTrialMapping;
     organizer.extractValidHeaders = @extractValidHeaders;
-    organizer.createROINoiseMap = @createROINoiseMap;
 end
 
 function [groupedFiles, groupKeys] = organizeFilesByGroup(excelFiles, rawMeanFolder)
@@ -190,348 +189,171 @@ function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData
 end
 
 function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData, groupMetadata, cfg)
-    % FIXED: 1AP-specific data organization with robust error handling
+    % FIXED: 1AP-specific data organization with simplified noise handling
     
     fprintf('    Collecting ROI information from %d files...\n', length(groupData));
     
-    try
-        % Extract trial numbers
-        [originalTrialNumbers, trialMapping] = createTrialMapping(groupMetadata);
+    % Extract trial numbers
+    [originalTrialNumbers, trialMapping] = createTrialMapping(groupMetadata);
+    
+    if isempty(originalTrialNumbers)
+        error('No valid trial numbers found in metadata');
+    end
+    
+    % SIMPLIFIED: Collect ROI information without complex noise mapping
+    utils = string_utils(cfg);
+    allROIData = [];
+    
+    for fileIdx = 1:length(groupData)
+        fileData = groupData{fileIdx};
         
-        if isempty(originalTrialNumbers)
-            error('No valid trial numbers found in metadata');
+        if isempty(fileData) || ~isfield(fileData, 'roiNames') || isempty(fileData.roiNames)
+            fprintf('      File %d: No valid ROI data\n', fileIdx);
+            continue;
         end
         
-        % ENHANCED: Collect ROI information with better debugging
-        utils = string_utils(cfg);
-        allROINums = [];
-        allNoiseTypes = {};
+        fprintf('      File %d: Extracting from %d ROI names\n', fileIdx, length(fileData.roiNames));
         
-        for fileIdx = 1:length(groupData)
-            fileData = groupData{fileIdx};
+        % Debug: Show first few ROI names
+        if length(fileData.roiNames) >= 3
+            fprintf('        Sample ROI names: "%s", "%s", "%s"\n', ...
+                    char(fileData.roiNames{1}), char(fileData.roiNames{2}), char(fileData.roiNames{3}));
+        end
+        
+        roiNums = utils.extractROINumbers(fileData.roiNames);
+        fprintf('      File %d: %d ROIs found\n', fileIdx, length(roiNums));
+        
+        if isempty(roiNums)
+            fprintf('      File %d: WARNING - No ROI numbers extracted!\n', fileIdx);
+            continue;
+        end
+        
+        % Store ROI data for this file
+        fileROIData = struct();
+        fileROIData.roiNumbers = roiNums;
+        fileROIData.dF_values = fileData.dF_values;
+        fileROIData.thresholds = fileData.thresholds;
+        fileROIData.roiNames = fileData.roiNames;
+        fileROIData.fileIndex = fileIdx;
+        
+        allROIData = [allROIData; fileROIData];
+    end
+    
+    if isempty(allROIData)
+        error('No ROIs found in any files for group');
+    end
+    
+    % Get all unique ROI numbers
+    allUniqueROIs = [];
+    for i = 1:length(allROIData)
+        allUniqueROIs = [allUniqueROIs; allROIData(i).roiNumbers];
+    end
+    
+    uniqueROIs = unique(allUniqueROIs);
+    uniqueROIs = sort(uniqueROIs);
+    
+    fprintf('    Total unique ROIs found: %d\n', length(uniqueROIs));
+    
+    % Create noise classification map (SIMPLIFIED)
+    roiNoiseMap = containers.Map('KeyType', 'double', 'ValueType', 'char');
+    
+    for roiNum = uniqueROIs'
+        % Find all instances of this ROI across files
+        lowNoiseCount = 0;
+        highNoiseCount = 0;
+        
+        for fileIdx = 1:length(allROIData)
+            fileData = allROIData(fileIdx);
+            roiPos = find(fileData.roiNumbers == roiNum, 1);
             
-            % Enhanced debugging
-            if isempty(fileData)
-                fprintf('      File %d: Empty data structure\n', fileIdx);
-                continue;
-            end
-            
-            if ~isfield(fileData, 'roiNames')
-                fprintf('      File %d: Missing roiNames field\n', fileIdx);
-                continue;
-            end
-            
-            if isempty(fileData.roiNames)
-                fprintf('      File %d: Empty roiNames\n', fileIdx);
-                continue;
-            end
-            
-            fprintf('      File %d: Extracting from %d ROI names\n', fileIdx, length(fileData.roiNames));
-            
-            % Debug: Show first few ROI names
-            if length(fileData.roiNames) >= 3
-                fprintf('        Sample ROI names: "%s", "%s", "%s"\n', ...
-                        char(fileData.roiNames{1}), char(fileData.roiNames{2}), char(fileData.roiNames{3}));
-            end
-            
-            roiNums = utils.extractROINumbers(fileData.roiNames);
-            fprintf('      File %d: %d ROIs found\n', fileIdx, length(roiNums));
-            
-            if isempty(roiNums)
-                fprintf('      File %d: WARNING - No ROI numbers extracted!\n', fileIdx);
-                continue;
-            end
-            
-            thresholds = fileData.thresholds;
-            
-            for roiIdx = 1:length(roiNums)
-                allROINums(end+1) = roiNums(roiIdx);
-                
-                % Classify noise level
-                if roiIdx <= length(thresholds) && isfinite(thresholds(roiIdx))
-                    if thresholds(roiIdx) <= cfg.thresholds.LOW_NOISE_CUTOFF
-                        allNoiseTypes{end+1} = 'low';
+            if ~isempty(roiPos) && roiPos <= length(fileData.thresholds)
+                threshold = fileData.thresholds(roiPos);
+                if isfinite(threshold)
+                    if threshold <= cfg.thresholds.LOW_NOISE_CUTOFF
+                        lowNoiseCount = lowNoiseCount + 1;
                     else
-                        allNoiseTypes{end+1} = 'high';
+                        highNoiseCount = highNoiseCount + 1;
                     end
-                else
-                    allNoiseTypes{end+1} = 'unknown';
                 end
             end
         end
         
-        if isempty(allROINums)
-            error('No ROIs found in any files for group');
+        % Majority vote
+        if lowNoiseCount >= highNoiseCount
+            roiNoiseMap(roiNum) = 'low';
+        else
+            roiNoiseMap(roiNum) = 'high';
         end
-        
-        uniqueROIs = unique(allROINums);
-        uniqueROIs = sort(uniqueROIs);
-        
-        fprintf('    Total unique ROIs found: %d\n', length(uniqueROIs));
-        
-        % Create ROI noise classification map
-        roiNoiseMap = createROINoiseMap(uniqueROIs, allROINums, allNoiseTypes);
-        
-        % FIXED: Safer data organization with better error handling
-        fprintf('    Creating organized data structure...\n');
-        [organizedData, allThresholds] = createOrganizedDataSafe(groupData, uniqueROIs, originalTrialNumbers, utils, cfg);
-        
-        % Create ROI info
-        roiInfo = struct();
-        roiInfo.roiNumbers = uniqueROIs;
-        roiInfo.roiNoiseMap = roiNoiseMap;
-        roiInfo.numTrials = length(originalTrialNumbers);
-        roiInfo.originalTrialNumbers = originalTrialNumbers;
-        roiInfo.trialMapping = trialMapping;
-        roiInfo.experimentType = '1AP';
-        roiInfo.thresholds = allThresholds;
-        roiInfo.dataType = 'single';
-        
-        % Create averaged data
-        fprintf('    Creating averaged data...\n');
-        roiAveragedData = createROIAveragedData1APSafe(organizedData, roiInfo);
-        totalAveragedData = createTotalAveragedData1APSafe(organizedData, roiInfo);
-        
-        averagedData = struct();
-        averagedData.roi = roiAveragedData;
-        averagedData.total = totalAveragedData;
-        
-        fprintf('    Organization complete: %d columns in organized data\n', width(organizedData)-1);
-        
-    catch ME
-        fprintf('    ERROR in organizeGroupData1AP: %s\n', ME.message);
-        fprintf('    Stack trace:\n');
-        for i = 1:min(3, length(ME.stack))
-            fprintf('      %s (line %d)\n', ME.stack(i).name, ME.stack(i).line);
-        end
-        rethrow(ME);
     end
-end
-
-function [organizedTable, allThresholds] = createOrganizedDataSafe(groupData, uniqueROIs, originalTrialNumbers, utils, cfg)
-    % FIXED: Create organized data with robust error handling
     
+    % Organize data into table format
     timeData_ms = groupData{1}.timeData_ms;
     numTrials = length(originalTrialNumbers);
     
     organizedTable = table();
     organizedTable.Frame = timeData_ms;
     
-    % Pre-allocate thresholds array
-    allThresholds = NaN(length(uniqueROIs), numTrials, 'single');
+    % Create data columns
+    allThresholds = NaN(length(uniqueROIs), numTrials);
     
     fprintf('    Organizing %d ROIs across %d trials\n', length(uniqueROIs), numTrials);
     
-    % SAFER: Loop with extensive error checking
     for roiIdx = 1:length(uniqueROIs)
         roiNum = uniqueROIs(roiIdx);
         
         for trialIdx = 1:numTrials
             originalTrialNum = originalTrialNumbers(trialIdx);
             
-            if ~isfinite(originalTrialNum)
-                continue;
-            end
-            
-            colName = sprintf('ROI%d_T%g', roiNum, originalTrialNum);
-            
-            try
-                % SAFER: Validate indices before access
-                if trialIdx > length(groupData)
-                    organizedTable.(colName) = NaN(length(timeData_ms), 1, 'single');
-                    continue;
-                end
+            if isfinite(originalTrialNum)
+                colName = sprintf('ROI%d_T%g', roiNum, originalTrialNum);
                 
-                data = groupData{trialIdx};
-                if isempty(data) || ~isfield(data, 'dF_values') || ~isfield(data, 'roiNames')
-                    organizedTable.(colName) = NaN(length(timeData_ms), 1, 'single');
-                    continue;
-                end
-                
-                % SAFER: ROI number extraction with validation
-                roiNums = utils.extractROINumbers(data.roiNames);
-                if isempty(roiNums)
-                    organizedTable.(colName) = NaN(length(timeData_ms), 1, 'single');
-                    continue;
-                end
-                
-                roiPos = find(roiNums == roiNum, 1);
-                
-                % SAFER: Multiple bounds checks
-                if isempty(roiPos)
-                    organizedTable.(colName) = NaN(length(timeData_ms), 1, 'single');
-                    continue;
-                end
-                
-                if roiPos > size(data.dF_values, 2)
-                    fprintf('      WARNING: roiPos (%d) > data columns (%d) for ROI %d trial %g\n', ...
-                            roiPos, size(data.dF_values, 2), roiNum, originalTrialNum);
-                    organizedTable.(colName) = NaN(length(timeData_ms), 1, 'single');
-                    continue;
-                end
-                
-                if size(data.dF_values, 1) ~= length(timeData_ms)
-                    fprintf('      WARNING: Frame count mismatch for ROI %d trial %g\n', roiNum, originalTrialNum);
-                    organizedTable.(colName) = NaN(length(timeData_ms), 1, 'single');
-                    continue;
-                end
-                
-                % SAFER: Extract data with bounds checking
-                organizedTable.(colName) = data.dF_values(:, roiPos);
-                
-                % SAFER: Extract threshold with bounds checking
-                if isfield(data, 'thresholds') && ~isempty(data.thresholds) && ...
-                   roiPos <= length(data.thresholds) && roiIdx <= size(allThresholds, 1) && ...
-                   trialIdx <= size(allThresholds, 2)
-                    allThresholds(roiIdx, trialIdx) = data.thresholds(roiPos);
-                end
-                
-            catch ME
-                fprintf('      ERROR processing ROI %d trial %g: %s\n', roiNum, originalTrialNum, ME.message);
-                organizedTable.(colName) = NaN(length(timeData_ms), 1, 'single');
-            end
-        end
-    end
-end
-
-function roiAveragedData = createROIAveragedData1APSafe(organizedData, roiInfo)
-    % FIXED: Create ROI-averaged data with safe indexing
-    
-    timeData_ms = organizedData.Frame;
-    averagedTable = table();
-    averagedTable.Frame = timeData_ms;
-    
-    try
-        for i = 1:length(roiInfo.roiNumbers)
-            originalROI = roiInfo.roiNumbers(i);  % Original ROI number
-            
-            % Find all trials for this ROI
-            validTrialData = [];
-            validTrialCount = 0;
-            
-            for trialIdx = 1:roiInfo.numTrials
-                originalTrialNum = roiInfo.originalTrialNumbers(trialIdx);
-                if isfinite(originalTrialNum)
-                    colName = sprintf('ROI%d_T%g', originalROI, originalTrialNum);
-                    
-                    if ismember(colName, organizedData.Properties.VariableNames)
-                        trialData = organizedData.(colName);
-                        if ~all(isnan(trialData))
-                            validTrialCount = validTrialCount + 1;
-                            if isempty(validTrialData)
-                                validTrialData = trialData;
-                            else
-                                validTrialData = [validTrialData, trialData];
+                % Find data for this ROI in this trial
+                found = false;
+                for fileIdx = 1:length(allROIData)
+                    fileData = allROIData(fileIdx);
+                    if fileData.fileIndex == trialIdx % Match trial index
+                        roiPos = find(fileData.roiNumbers == roiNum, 1);
+                        
+                        if ~isempty(roiPos) && roiPos <= size(fileData.dF_values, 2)
+                            organizedTable.(colName) = fileData.dF_values(:, roiPos);
+                            if roiPos <= length(fileData.thresholds)
+                                allThresholds(roiIdx, trialIdx) = fileData.thresholds(roiPos);
                             end
+                            found = true;
+                            break;
                         end
                     end
                 end
-            end
-            
-            % Calculate average if data exists
-            if validTrialCount > 0
-                meanData = mean(validTrialData, 2, 'omitnan');
-                avgColName = sprintf('ROI%d_n%d', originalROI, validTrialCount);
-                averagedTable.(avgColName) = meanData;
-            end
-        end
-        
-    catch ME
-        fprintf('      ERROR in createROIAveragedData1APSafe: %s\n', ME.message);
-        rethrow(ME);
-    end
-    
-    roiAveragedData = averagedTable;
-end
-
-function totalAveragedData = createTotalAveragedData1APSafe(organizedData, roiInfo)
-    % FIXED: Create total averaged data with safe processing
-    
-    timeData_ms = organizedData.Frame;
-    totalAveragedTable = table();
-    totalAveragedTable.Frame = timeData_ms;
-    
-    try
-        % Get all data columns (skip Frame)
-        dataVarNames = organizedData.Properties.VariableNames(2:end);
-        
-        if isempty(dataVarNames)
-            totalAveragedData = totalAveragedTable;
-            return;
-        end
-        
-        % Separate data by noise level
-        lowNoiseData = [];
-        highNoiseData = [];
-        allValidData = [];
-        
-        lowNoiseCount = 0;
-        highNoiseCount = 0;
-        
-        for colIdx = 1:length(dataVarNames)
-            colName = dataVarNames{colIdx};
-            colData = organizedData.(colName);
-            
-            % Skip columns with all NaN
-            if all(isnan(colData))
-                continue;
-            end
-            
-            % Extract ROI number
-            roiMatch = regexp(colName, 'ROI(\d+)_T', 'tokens');
-            if ~isempty(roiMatch)
-                roiNum = str2double(roiMatch{1}{1});
                 
-                if isKey(roiInfo.roiNoiseMap, roiNum)
-                    noiseLevel = roiInfo.roiNoiseMap(roiNum);
-                    
-                    if isempty(allValidData)
-                        allValidData = colData;
-                    else
-                        allValidData = [allValidData, colData];
-                    end
-                    
-                    if strcmp(noiseLevel, 'low')
-                        lowNoiseCount = lowNoiseCount + 1;
-                        if isempty(lowNoiseData)
-                            lowNoiseData = colData;
-                        else
-                            lowNoiseData = [lowNoiseData, colData];
-                        end
-                    elseif strcmp(noiseLevel, 'high')
-                        highNoiseCount = highNoiseCount + 1;
-                        if isempty(highNoiseData)
-                            highNoiseData = colData;
-                        else
-                            highNoiseData = [highNoiseData, colData];
-                        end
-                    end
+                if ~found
+                    organizedTable.(colName) = NaN(length(timeData_ms), 1, 'single');
                 end
             end
         end
-        
-        % Calculate averages
-        if ~isempty(lowNoiseData)
-            lowNoiseAvg = mean(lowNoiseData, 2, 'omitnan');
-            totalAveragedTable.(sprintf('Low_Noise_n%d', lowNoiseCount)) = lowNoiseAvg;
-        end
-        
-        if ~isempty(highNoiseData)
-            highNoiseAvg = mean(highNoiseData, 2, 'omitnan');
-            totalAveragedTable.(sprintf('High_Noise_n%d', highNoiseCount)) = highNoiseAvg;
-        end
-        
-        if ~isempty(allValidData)
-            allAvg = mean(allValidData, 2, 'omitnan');
-            totalAveragedTable.(sprintf('All_n%d', size(allValidData, 2))) = allAvg;
-        end
-        
-    catch ME
-        fprintf('      ERROR in createTotalAveragedData1APSafe: %s\n', ME.message);
-        rethrow(ME);
     end
     
-    totalAveragedData = totalAveragedTable;
+    organizedData = organizedTable;
+    
+    % Create ROI info
+    roiInfo = struct();
+    roiInfo.roiNumbers = uniqueROIs;
+    roiInfo.roiNoiseMap = roiNoiseMap;
+    roiInfo.numTrials = numTrials;
+    roiInfo.originalTrialNumbers = originalTrialNumbers;
+    roiInfo.trialMapping = trialMapping;
+    roiInfo.experimentType = '1AP';
+    roiInfo.thresholds = allThresholds;
+    roiInfo.dataType = 'single';
+    
+    % Create averaged data
+    roiAveragedData = createROIAveragedData1AP(organizedData, roiInfo, timeData_ms);
+    totalAveragedData = createTotalAveragedData1AP(organizedData, roiInfo, timeData_ms);
+    
+    averagedData = struct();
+    averagedData.roi = roiAveragedData;
+    averagedData.total = totalAveragedData;
+    
+    fprintf('    Organization complete: %d columns in organized data\n', width(organizedData)-1);
 end
 
 function [originalTrialNumbers, trialMapping] = createTrialMapping(groupMetadata)
@@ -609,23 +431,128 @@ function [validHeaders, validColumns] = extractValidHeaders(headers)
     validColumns = validColumns(1:validCount);
 end
 
-function roiNoiseMap = createROINoiseMap(uniqueROIs, allROINums, allNoiseTypes)
-    % Create noise classification map for ROIs
+function roiAveragedData = createROIAveragedData1AP(organizedData, roiInfo, timeData_ms)
+    % Create ROI-averaged data for 1AP experiments
     
-    roiNoiseMap = containers.Map('KeyType', 'double', 'ValueType', 'char');
+    averagedTable = table();
+    averagedTable.Frame = timeData_ms;
     
-    for roiNum = uniqueROIs'
-        roiOccurrences = allROINums == roiNum;
-        roiNoiseTypes = allNoiseTypes(roiOccurrences);
+    for i = 1:length(roiInfo.roiNumbers)
+        roiNum = roiInfo.roiNumbers(i);
         
-        % Majority vote for noise level
-        lowCount = sum(strcmp(roiNoiseTypes, 'low'));
-        highCount = sum(strcmp(roiNoiseTypes, 'high'));
+        % Find all trials for this ROI
+        validTrialData = [];
+        validTrialCount = 0;
         
-        if lowCount >= highCount
-            roiNoiseMap(roiNum) = 'low';
-        else
-            roiNoiseMap(roiNum) = 'high';
+        for trialIdx = 1:roiInfo.numTrials
+            originalTrialNum = roiInfo.originalTrialNumbers(trialIdx);
+            if isfinite(originalTrialNum)
+                colName = sprintf('ROI%d_T%g', roiNum, originalTrialNum);
+                
+                if ismember(colName, organizedData.Properties.VariableNames)
+                    trialData = organizedData.(colName);
+                    if ~all(isnan(trialData))
+                        validTrialCount = validTrialCount + 1;
+                        if isempty(validTrialData)
+                            validTrialData = trialData;
+                        else
+                            validTrialData = [validTrialData, trialData];
+                        end
+                    end
+                end
+            end
+        end
+        
+        % Calculate average if data exists
+        if validTrialCount > 0
+            meanData = mean(validTrialData, 2, 'omitnan');
+            avgColName = sprintf('ROI%d_n%d', roiNum, validTrialCount);
+            averagedTable.(avgColName) = meanData;
         end
     end
+    
+    roiAveragedData = averagedTable;
+end
+
+function totalAveragedData = createTotalAveragedData1AP(organizedData, roiInfo, timeData_ms)
+    % Create total averaged data by noise level for 1AP experiments
+    
+    totalAveragedTable = table();
+    totalAveragedTable.Frame = timeData_ms;
+    
+    % Get all data columns (skip Frame)
+    dataVarNames = organizedData.Properties.VariableNames(2:end);
+    
+    if isempty(dataVarNames)
+        totalAveragedData = totalAveragedTable;
+        return;
+    end
+    
+    % Separate data by noise level
+    lowNoiseData = [];
+    highNoiseData = [];
+    allValidData = [];
+    
+    lowNoiseCount = 0;
+    highNoiseCount = 0;
+    
+    for colIdx = 1:length(dataVarNames)
+        colName = dataVarNames{colIdx};
+        colData = organizedData.(colName);
+        
+        % Skip columns with all NaN
+        if all(isnan(colData))
+            continue;
+        end
+        
+        % Extract ROI number
+        roiMatch = regexp(colName, 'ROI(\d+)_T', 'tokens');
+        if ~isempty(roiMatch)
+            roiNum = str2double(roiMatch{1}{1});
+            
+            if isKey(roiInfo.roiNoiseMap, roiNum)
+                noiseLevel = roiInfo.roiNoiseMap(roiNum);
+                
+                if isempty(allValidData)
+                    allValidData = colData;
+                else
+                    allValidData = [allValidData, colData];
+                end
+                
+                if strcmp(noiseLevel, 'low')
+                    lowNoiseCount = lowNoiseCount + 1;
+                    if isempty(lowNoiseData)
+                        lowNoiseData = colData;
+                    else
+                        lowNoiseData = [lowNoiseData, colData];
+                    end
+                elseif strcmp(noiseLevel, 'high')
+                    highNoiseCount = highNoiseCount + 1;
+                    if isempty(highNoiseData)
+                        highNoiseData = colData;
+                    else
+                        highNoiseData = [highNoiseData, colData];
+                    end
+                end
+            end
+        end
+    end
+    
+    % Calculate averages
+    if ~isempty(lowNoiseData)
+        lowNoiseAvg = mean(lowNoiseData, 2, 'omitnan');
+        totalAveragedTable.(sprintf('Low_Noise_n%d', lowNoiseCount)) = lowNoiseAvg;
+    end
+    
+    if ~isempty(highNoiseData)
+        highNoiseAvg = mean(highNoiseData, 2, 'omitnan');
+        totalAveragedTable.(sprintf('High_Noise_n%d', highNoiseCount)) = highNoiseAvg;
+    end
+    
+    if ~isempty(allValidData)
+        allAvg = mean(allValidData, 2, 'omitnan');
+        totalAveragedTable.(sprintf('All_n%d', size(allValidData, 2))) = allAvg;
+    end
+    
+    totalAveragedData = totalAveragedTable;
 end

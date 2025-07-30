@@ -21,7 +21,7 @@ end
 function runMainPipeline()
     % Main pipeline entry point - replaces the monolithic script
     
-    scriptName = 'GluSnFR_Analysis_Pipeline_v50_Modular';
+    scriptName = 'GluSnFR_Analysis_Pipeline_v52_Modular';
     fprintf('=== %s ===\n', scriptName);
     fprintf('Modular architecture with optimized processing\n');
     fprintf('Processing Date: %s\n', char(datetime('now')));
@@ -78,7 +78,7 @@ function runMainPipeline()
         
         % Save comprehensive log
         totalTime = toc(globalTimer);
-        logFileName = fullfile(fileparts(rawMeanFolder), 'modular_pipeline_log_v50.txt');
+        logFileName = fullfile(fileparts(rawMeanFolder), 'modular_pipeline_log_v52.txt');
         modules.io.saveLog(logBuffer, logFileName);
         
         fprintf('\n=== PIPELINE COMPLETE ===\n');
@@ -98,7 +98,7 @@ function runMainPipeline()
         if exist('logBuffer', 'var')
             logBuffer{end+1} = sprintf('PIPELINE ERROR: %s', ME.message);
             if exist('rawMeanFolder', 'var') && exist('modules', 'var')
-                errorLogFile = fullfile(fileparts(rawMeanFolder), 'error_log_v50.txt');
+                errorLogFile = fullfile(fileparts(rawMeanFolder), 'error_log_v52.txt');
                 modules.io.saveLog(logBuffer, errorLogFile);
                 fprintf('Log saved to: %s\n', errorLogFile);
             end
@@ -120,7 +120,7 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
     
     % ==================== VERSION CONTROL ====================
     % CHANGE THIS NUMBER TO UPDATE ALL FOLDER NAMES
-    VERSION = '51';  % <-- CHANGE THIS NUMBER HERE (incremented from 50)
+    VERSION = '52';  % <-- CHANGE THIS NUMBER HERE (incremented from 50)
     % ==========================================================
     
     % Default directory (can be customized)
@@ -144,9 +144,9 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
     % Create output folders with version variable
     processedImagesFolder = fileparts(rawMeanFolder);
     outputFolders = struct();
-    outputFolders.main = fullfile(processedImagesFolder, sprintf('6_v%s_fixed_modular_dF_F', VERSION));
-    outputFolders.individual = fullfile(processedImagesFolder, sprintf('6_v%s_fixed_modular_plots_trials', VERSION));
-    outputFolders.averaged = fullfile(processedImagesFolder, sprintf('6_v%s_fixed_modular_plots_averaged', VERSION));
+    outputFolders.main = fullfile(processedImagesFolder, sprintf('6_v%s_dF_F', VERSION));
+    outputFolders.individual = fullfile(processedImagesFolder, sprintf('6_v%s_plots_trials', VERSION));
+    outputFolders.averaged = fullfile(processedImagesFolder, sprintf('6_v%s_plots_averaged', VERSION));
     
     % Create directories using the io manager
     fprintf('Creating output directories...\n');
