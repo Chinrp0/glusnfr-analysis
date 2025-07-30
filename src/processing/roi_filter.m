@@ -57,9 +57,9 @@ function [adaptiveThresholds, noiseClassification] = calculateAdaptiveThresholds
     
     lowNoiseROIs = baseThresholds <= cfg.thresholds.LOW_NOISE_CUTOFF;
     
-    % FIXED: Use smaller multiplier for high noise (1.2 instead of 1.5)
+    % FIXED: Use 1.5 times 
     adaptiveThresholds = baseThresholds;
-    adaptiveThresholds(~lowNoiseROIs) = 1.2 * baseThresholds(~lowNoiseROIs);
+    adaptiveThresholds(~lowNoiseROIs) = 1.5 * baseThresholds(~lowNoiseROIs);
     
     % Create noise classification map
     noiseClassification = repmat({'high'}, size(baseThresholds));
@@ -77,10 +77,9 @@ function responseFilter = apply1APFiltering(dF_values, thresholds, cfg)
     
     maxResponses = getStimulusResponse(dF_values, stimulusFrame, postWindow);
     
-    % FIXED: Use 70% of threshold instead of 100% (more lenient)
-    responseFilter = maxResponses >= (0.7 * thresholds) & isfinite(maxResponses);
+    responseFilter = maxResponses >= (1 * thresholds) & isfinite(maxResponses);
     
-    fprintf('    1AP filtering: %d/%d ROIs passed threshold (70%% of threshold used)\n', ...
+    fprintf('    1AP filtering: %d/%d ROIs passed threshold \n', ...
             sum(responseFilter), length(responseFilter));
 end
 
@@ -94,9 +93,9 @@ function responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms,
     maxResponses1 = getStimulusResponse(dF_values, stimulusFrame1, postWindow);
     maxResponses2 = getStimulusResponse(dF_values, stimulusFrame2, postWindow);
     
-    % FIXED: Use 60% of threshold (more lenient) and allow either stimulus
-    response1Filter = maxResponses1 >= (0.6 * thresholds) & isfinite(maxResponses1);
-    response2Filter = maxResponses2 >= (0.6 * thresholds) & isfinite(maxResponses2);
+    % FIXED: allow either stimulus
+    response1Filter = maxResponses1 >= (1 * thresholds) & isfinite(maxResponses1);
+    response2Filter = maxResponses2 >= (1 * thresholds) & isfinite(maxResponses2);
     responseFilter = response1Filter | response2Filter;
     
     fprintf('    PPF filtering (%dms): stim1=%d, stim2=%d, either=%d ROIs (60%% threshold)\n', ...
