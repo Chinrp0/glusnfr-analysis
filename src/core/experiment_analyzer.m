@@ -7,94 +7,14 @@ function analyzer = experiment_analyzer()
     % - Statistics and summary generation
     % - Results validation and quality control
     
-    analyzer.processSingleFile = @processSingleFile;
+
     analyzer.generateMetadata = @generateExperimentMetadata;
     analyzer.validateResults = @validateExperimentResults;
     analyzer.calculateStatistics = @calculateExperimentStatistics;
     analyzer.createSummary = @createResultsSummary;
 end
 
-function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMatrix, hasGPU, gpuInfo)
-    % Process a single Excel file through the complete pipeline
-    
-    fullFilePath = fullfile(fileInfo.folder, fileInfo.name);
-    fprintf('    Processing: %s\n', fileInfo.name);
-    
-    % Load modules
-    io = io_manager();
-    calc = df_calculator();
-    filter = roi_filter();
-    utils = string_utils();
-    
-    % Read file
-    [rawData, headers, readSuccess] = io.readExcelFile(fullFilePath, useReadMatrix);
-    
-    if ~readSuccess || isempty(rawData)
-        error('Failed to read file: %s', fileInfo.name);
-    end
-    
-    % Extract valid headers and data
-    organizer = data_organizer();
-    [validHeaders, validColumns] = organizer.extractValidHeaders(headers);
-    
-    if isempty(validHeaders)
-        error('No valid ROI headers found in %s', fileInfo.name);
-    end
-    
-    % Extract valid data columns
-    numericData = single(rawData(:, validColumns));
-    
-    % Create time data
-    cfg = GluSnFRConfig();
-    timeData_ms = single((0:(size(numericData, 1)-1))' * cfg.timing.MS_PER_FRAME);
-    
-    % Calculate dF/F
-    [dF_values, thresholds, gpuUsed] = calc.calculate(numericData, hasGPU, gpuInfo);
-    
-    % Extract experiment info
-    [trialNum, expType, ppiValue, coverslipCell] = utils.extractTrialInfo(fileInfo.name);
-    
-    % Apply filtering
-    if strcmp(expType, 'PPF') && isfinite(ppiValue)
-        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
-            filter.filterROIs(dF_values, validHeaders, thresholds, 'PPF', ppiValue);
-    else
-        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
-            filter.filterROIs(dF_values, validHeaders, thresholds, '1AP');
-    end
-    
-    % Prepare output structures
-    data = struct();
-    data.timeData_ms = timeData_ms;
-    data.dF_values = finalDFValues;
-    data.roiNames = finalHeaders;
-    data.thresholds = finalThresholds;
-    data.stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS;
-    data.gpuUsed = gpuUsed;
-    data.filterStats = filterStats;
-    
-    metadata = struct();
-    metadata.filename = fileInfo.name;
-    metadata.numFrames = size(numericData, 1);
-    metadata.numROIs = length(finalHeaders);
-    metadata.numOriginalROIs = length(validHeaders);
-    metadata.filterRate = metadata.numROIs / metadata.numOriginalROIs;
-    metadata.gpuUsed = gpuUsed;
-    metadata.dataType = 'single';
-    metadata.trialNumber = trialNum;
-    metadata.experimentType = expType;
-    metadata.ppiValue = ppiValue;
-    metadata.coverslipCell = coverslipCell;
-    
-    % Log results
-    if strcmp(expType, 'PPF')
-        fprintf('      Final result: %d ROIs for %s PPI=%dms trial=%g (%.1f%% passed filter)\n', ...
-                metadata.numROIs, expType, ppiValue, trialNum, metadata.filterRate*100);
-    else
-        fprintf('      Final result: %d ROIs for %s trial=%g (%.1f%% passed filter)\n', ...
-                metadata.numROIs, expType, trialNum, metadata.filterRate*100);
-    end
-end
+
 
 function metadataTable = generateExperimentMetadata(organizedData, roiInfo, filepath)
     % Generate comprehensive metadata for Script 1 optimization

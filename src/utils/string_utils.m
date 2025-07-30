@@ -9,6 +9,7 @@ function utils = string_utils()
     utils.extractGroupKey = @extractGroupKeyOptimized;
     utils.extractROINumbers = @extractROINumbersOptimized;
     utils.extractTrialInfo = @extractTrialInfoOptimized;
+    utils.extractTrialOrPPI = @extractTrialOrPPI;
     utils.extractGenotype = @extractGenotypeOptimized;
     utils.parseFilename = @parseFilenameOptimized;
 end
@@ -157,6 +158,77 @@ function [trialNum, expType, ppiValue, coverslipCell] = extractTrialInfoOptimize
         warning('Error extracting trial info from %s: %s', filename, ME.message);
     end
 end
+
+function [trialNum, expType, ppiValue, coverslipCell] = extractTrialOrPPIOptimized(filename)
+    % MISSING FUNCTION: Comprehensive trial/PPI extraction (from original script)
+    % This is the EXACT function from the original backup_original_v50.m
+    
+    trialNum = NaN;
+    expType = '';
+    ppiValue = NaN;
+    coverslipCell = '';
+    
+    try
+        % Extract coverslip-cell info first
+        csPattern = '_Cs(\d+)-c(\d+)_';
+        csMatch = regexp(filename, csPattern, 'tokens');
+        if ~isempty(csMatch)
+            coverslipCell = sprintf('Cs%s-c%s', csMatch{1}{1}, csMatch{1}{2});
+        end
+        
+        % Determine experiment type first
+        if contains(filename, '1AP')
+            expType = '1AP';
+            % Pattern matching for 1AP
+            patterns = {'1AP-(\d+)', '1AP_(\d+)', '1AP(\d+)'};
+            
+            for i = 1:length(patterns)
+                trialMatch = regexp(filename, patterns{i}, 'tokens');
+                if ~isempty(trialMatch)
+                    trialNum = str2double(trialMatch{1}{1});
+                    break;
+                end
+            end
+            
+        elseif contains(filename, 'PPF')
+            expType = 'PPF';
+            % Pattern matching for PPF
+            ppfPattern = 'PPF-(\d+)ms-(\d+)';
+            ppfMatch = regexp(filename, ppfPattern, 'tokens');
+            
+            if ~isempty(ppfMatch)
+                ppiValue = str2double(ppfMatch{1}{1});
+                trialNum = str2double(ppfMatch{1}{2});
+            end
+        end
+        
+        % Fallback patterns if main extraction fails
+        if isnan(trialNum)
+            fallbackPatterns = {'(\d+)_bg', '(\d+)_mean', '-(\d+)_', '_(\d+)\.'};
+            
+            for i = 1:length(fallbackPatterns)
+                fallbackMatch = regexp(filename, fallbackPatterns{i}, 'tokens');
+                if ~isempty(fallbackMatch)
+                    trialNum = str2double(fallbackMatch{1}{1});
+                    break;
+                end
+            end
+        end
+        
+        % Validation
+        if ~isnumeric(trialNum) || ~isscalar(trialNum) || ~isfinite(trialNum)
+            trialNum = NaN;
+        end
+        
+    catch ME
+        fprintf('    WARNING: Trial extraction error for %s: %s\n', filename, ME.message);
+        trialNum = NaN;
+        expType = '';
+        ppiValue = NaN;
+        coverslipCell = '';
+    end
+end
+
 
 function genotype = extractGenotypeOptimized(groupKey)
     % Extract genotype from group key

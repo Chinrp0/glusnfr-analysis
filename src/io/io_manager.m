@@ -9,6 +9,7 @@ function io = io_manager()
     
     io.readExcelFile = @readExcelFileRobust;
     io.writeExcelWithHeaders = @writeExcelWithCustomHeaders;
+    io.extractValidHeaders = @extractValidHeaders;
     io.writeExperimentResults = @writeExperimentResults;
     io.createDirectories = @createDirectoriesIfNeeded;
     io.validateFile = @validateExcelFile;
@@ -348,6 +349,33 @@ function [row1, row2] = createTotalAverageHeaders(dataTable)
             row2{i} = varName;
         end
     end
+end
+
+function [validHeaders, validColumns] = extractValidHeaders(headers)
+    % MISSING FUNCTION: Referenced in data_organizer.m but not in io_manager.m
+    
+    numHeaders = length(headers);
+    validHeaders = cell(numHeaders, 1);
+    validColumns = zeros(numHeaders, 1);
+    validCount = 0;
+    
+    for i = 1:numHeaders
+        header = headers{i};
+        if ~isempty(header) && (ischar(header) || isstring(header))
+            cleanHeader = strtrim(char(header));
+            if ~isempty(cleanHeader)
+                validCount = validCount + 1;
+                validHeaders{validCount} = cleanHeader;
+                validColumns(validCount) = i;
+            end
+        end
+    end
+    
+    % Trim to actual size
+    validHeaders = validHeaders(1:validCount);
+    validColumns = validColumns(1:validCount);
+    
+    fprintf('      Extracted %d valid headers from %d total columns\n', validCount, numHeaders);
 end
 
 function [lowNoiseData, highNoiseData] = separateDataByNoiseLevel(organizedData, roiInfo)

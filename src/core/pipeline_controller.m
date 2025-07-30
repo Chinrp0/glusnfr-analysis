@@ -10,6 +10,7 @@ function controller = pipeline_controller()
     
     controller.runMainPipeline = @runMainPipeline;
     controller.setupSystem = @setupSystemCapabilities;
+    controller.processSingleFile = @processSingleFile;
     controller.processAllGroups = @processAllGroups;
     controller.saveAllResults = @saveAllResults;
     controller.generateAllPlots = @generateAllPlots;
@@ -143,6 +144,19 @@ function [hasParallelToolbox, hasGPU, gpuInfo, poolObj] = setupSystemCapabilitie
     if hasParallelToolbox
         poolObj = setupParallelPool(hasGPU, gpuInfo);
     end
+
+        if hasGPU && ~isempty(poolObj)
+        try
+            spmd
+                if gpuDeviceCount > 0
+                    gpuDevice(1); % Use first GPU
+                end
+            end
+            fprintf('GPU configuration completed on all workers\n');
+        catch ME
+            fprintf('Warning: GPU configuration on workers failed: %s\n', ME.message);
+        end
+    end
 end
 
 function poolObj = setupParallelPool(hasGPU, gpuInfo)
@@ -215,6 +229,89 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
     
     fprintf('Input folder: %s\n', rawMeanFolder);
     fprintf('Output folder: %s\n', outputFolders.main);
+end
+
+
+function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMatrix, hasGPU, gpuInfo)
+    % MOVE THIS from experiment_analyzer.m to pipeline_controller.m
+    % Current location causes circular dependency
+    
+    fullFilePath = fullfile(fileInfo.folder, fileInfo.name);
+    fprintf('    Processing: %s\n', fileInfo.name);
+    
+    % Load modules (but avoid circular call)
+    io = io_manager();
+    calc = df_calculator();
+    filter = roi_filter();
+    utils = string_utils();
+    
+    % Read file
+    [rawData, headers, readSuccess] = io.readExcelFile(fullFilePath, useReadMatrix);
+    
+    if ~readSuccess || isempty(rawData)
+        error('Failed to read file: %s', fileInfo.name);
+    end
+    
+    % Extract valid headers and data
+    [validHeaders, validColumns] = io.extractValidHeaders(headers);
+    
+    if isempty(validHeaders)
+        error('No valid ROI headers found in %s', fileInfo.name);
+    end
+    
+    % Extract valid data columns
+    numericData = single(rawData(:, validColumns));
+    
+    % Create time data
+    cfg = GluSnFRConfig();
+    timeData_ms = single((0:(size(numericData, 1)-1))' * cfg.timing.MS_PER_FRAME);
+    
+    % Calculate dF/F
+    [dF_values, thresholds, gpuUsed] = calc.calculate(numericData, hasGPU, gpuInfo);
+    
+    % Extract experiment info
+    [trialNum, expType, ppiValue, coverslipCell] = utils.extractTrialOrPPI(fileInfo.name);
+    
+    % Apply filtering
+    if strcmp(expType, 'PPF') && isfinite(ppiValue)
+        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
+            filter.filterROIs(dF_values, validHeaders, thresholds, 'PPF', ppiValue);
+    else
+        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
+            filter.filterROIs(dF_values, validHeaders, thresholds, '1AP');
+    end
+    
+    % Prepare output structures
+    data = struct();
+    data.timeData_ms = timeData_ms;
+    data.dF_values = finalDFValues;
+    data.roiNames = finalHeaders;
+    data.thresholds = finalThresholds;
+    data.stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS;
+    data.gpuUsed = gpuUsed;
+    data.filterStats = filterStats;
+    
+    metadata = struct();
+    metadata.filename = fileInfo.name;
+    metadata.numFrames = size(numericData, 1);
+    metadata.numROIs = length(finalHeaders);
+    metadata.numOriginalROIs = length(validHeaders);
+    metadata.filterRate = metadata.numROIs / metadata.numOriginalROIs;
+    metadata.gpuUsed = gpuUsed;
+    metadata.dataType = 'single';
+    metadata.trialNumber = trialNum;
+    metadata.experimentType = expType;
+    metadata.ppiValue = ppiValue;
+    metadata.coverslipCell = coverslipCell;
+    
+    % Log results
+    if strcmp(expType, 'PPF')
+        fprintf('      Final result: %d ROIs for %s PPI=%dms trial=%g (%.1f%% passed filter)\n', ...
+                metadata.numROIs, expType, ppiValue, trialNum, metadata.filterRate*100);
+    else
+        fprintf('      Final result: %d ROIs for %s trial=%g (%.1f%% passed filter)\n', ...
+                metadata.numROIs, expType, trialNum, metadata.filterRate*100);
+    end
 end
 
 function [groupResults, groupTimes] = processAllGroups(groupedFiles, groupKeys, rawMeanFolder, ...
@@ -307,7 +404,7 @@ function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFol
     
     for fileIdx = 1:numFiles
         try
-            [data, metadata] = modules.analysis.processSingleFile(...
+            [data, metadata] = processSingleFile(...
                 filesInGroup(fileIdx), rawMeanFolder, useReadMatrix, hasGPU, gpuInfo);
             
             if ~isempty(data)
