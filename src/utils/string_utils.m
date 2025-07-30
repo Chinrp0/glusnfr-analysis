@@ -1,27 +1,30 @@
-function utils = string_utils()
+function utils = string_utils(config)
     % STRING_UTILS - Optimized string processing utilities
     % 
     % This module centralizes and optimizes all string processing
     % operations used throughout the pipeline, with cached regex
     % patterns for better performance.
+    %
+    % INPUT:
+    %   config - Configuration structure (to avoid circular dependencies)
     
-    % Return function handles for all utilities
-    utils.extractGroupKey = @extractGroupKeyOptimized;
-    utils.extractROINumbers = @extractROINumbersOptimized;
-    utils.extractTrialInfo = @extractTrialInfoOptimized;
-    utils.extractTrialOrPPI = @extractTrialOrPPI;
-    utils.extractGenotype = @extractGenotypeOptimized;
-    utils.parseFilename = @parseFilenameOptimized;
+    % Store config for use in internal functions
+    if nargin < 1
+        % Fallback: load config if not provided (for standalone usage)
+        config = GluSnFRConfig();
+    end
+    
+    % Return function handles for all utilities with config closure
+    utils.extractGroupKey = @(filename) extractGroupKey(filename, config);
+    utils.extractROINumbers = @(roiNames) extractROINumbers(roiNames, config);
+    utils.extractTrialInfo = @(filename) extractTrialInfo(filename, config);
+    utils.extractTrialOrPPI = @extractTrialOrPPI;  % Standalone function
+    utils.extractGenotype = @extractGenotype;
+    utils.parseFilename = @(filename) parseFilename(filename, config);
 end
 
-function groupKey = extractGroupKeyOptimized(filename)
-    % Optimized group key extraction with cached patterns
-    
-    persistent patterns;
-    if isempty(patterns)
-        cfg = GluSnFRConfig();
-        patterns = cfg.patterns;
-    end
+function groupKey = extractGroupKey(filename, config)
+    % Extract group key with cached patterns from config
     
     groupKey = '';
     
@@ -35,19 +38,19 @@ function groupKey = extractGroupKeyOptimized(filename)
         
         if contains(name, 'PPF')
             % PPF logic
-            ppfMatch = regexp(name, patterns.PPF_TIMEPOINT, 'tokens', 'once');
+            ppfMatch = regexp(name, config.patterns.PPF_TIMEPOINT, 'tokens', 'once');
             if ~isempty(ppfMatch)
                 timepoint = ppfMatch{1};
-                baseMatch = regexp(name, patterns.DOC2B, 'match', 'once');
+                baseMatch = regexp(name, config.patterns.DOC2B, 'match', 'once');
                 if ~isempty(baseMatch)
                     groupKey = sprintf('PPF_%sms%s', timepoint, baseMatch);
                 end
             end
         else
             % 1AP logic with cached patterns
-            doc2bMatch = regexp(name, patterns.DOC2B, 'match', 'once');
-            csMatch = regexp(name, patterns.COVERSLIP, 'match', 'once');
-            expMatch = regexp(name, patterns.EXPERIMENT, 'match', 'once');
+            doc2bMatch = regexp(name, config.patterns.DOC2B, 'match', 'once');
+            csMatch = regexp(name, config.patterns.COVERSLIP, 'match', 'once');
+            expMatch = regexp(name, config.patterns.EXPERIMENT, 'match', 'once');
             
             if ~isempty(doc2bMatch) && ~isempty(csMatch) && ~isempty(expMatch)
                 cpIndex = strfind(name, 'CP_');
@@ -66,14 +69,8 @@ function groupKey = extractGroupKeyOptimized(filename)
     end
 end
 
-function roiNumbers = extractROINumbersOptimized(roiNames)
-    % Optimized ROI number extraction with vectorization
-    
-    persistent roiPattern;
-    if isempty(roiPattern)
-        cfg = GluSnFRConfig();
-        roiPattern = cfg.patterns.ROI_NAME;
-    end
+function roiNumbers = extractROINumbers(roiNames, config)
+    % Extract ROI numbers with cached pattern
     
     numROIs = length(roiNames);
     roiNumbers = NaN(numROIs, 1);
@@ -83,8 +80,8 @@ function roiNumbers = extractROINumbersOptimized(roiNames)
         try
             roiName = char(roiNames{i});
             
-            % Use cached pattern
-            roiMatch = regexp(roiName, roiPattern, 'tokens', 'ignorecase', 'once');
+            % Use cached pattern from config
+            roiMatch = regexp(roiName, config.patterns.ROI_NAME, 'tokens', 'ignorecase', 'once');
             if ~isempty(roiMatch)
                 roiNum = str2double(roiMatch{1});
                 if isfinite(roiNum) && roiNum > 0 && roiNum <= 65535
@@ -102,14 +99,8 @@ function roiNumbers = extractROINumbersOptimized(roiNames)
     roiNumbers = roiNumbers(1:validCount);
 end
 
-function [trialNum, expType, ppiValue, coverslipCell] = extractTrialInfoOptimized(filename)
-    % Optimized trial/PPI information extraction
-    
-    persistent patterns;
-    if isempty(patterns)
-        cfg = GluSnFRConfig();
-        patterns = cfg.patterns;
-    end
+function [trialNum, expType, ppiValue, coverslipCell] = extractTrialInfo(filename, config)
+    % Extract trial/PPI information with cached patterns
     
     trialNum = NaN;
     expType = '';
@@ -118,7 +109,7 @@ function [trialNum, expType, ppiValue, coverslipCell] = extractTrialInfoOptimize
     
     try
         % Extract coverslip-cell info
-        csMatch = regexp(filename, patterns.COVERSLIP, 'tokens', 'once');
+        csMatch = regexp(filename, config.patterns.COVERSLIP, 'tokens', 'once');
         if ~isempty(csMatch)
             coverslipCell = sprintf('Cs%s-c%s', csMatch{1}, csMatch{2});
         end
@@ -160,8 +151,8 @@ function [trialNum, expType, ppiValue, coverslipCell] = extractTrialInfoOptimize
 end
 
 function [trialNum, expType, ppiValue, coverslipCell] = extractTrialOrPPI(filename)
-    % Comprehensive trial/PPI extraction (from original script)
-    % This is the EXACT function from the original backup_original_v50.m
+    % Comprehensive trial/PPI extraction (original implementation from backup)
+    % This is standalone to avoid circular dependencies
     
     trialNum = NaN;
     expType = '';
@@ -229,7 +220,7 @@ function [trialNum, expType, ppiValue, coverslipCell] = extractTrialOrPPI(filena
     end
 end
 
-function genotype = extractGenotypeOptimized(groupKey)
+function genotype = extractGenotype(groupKey)
     % Extract genotype from group key
     
     if contains(groupKey, 'R213W')
@@ -241,17 +232,17 @@ function genotype = extractGenotypeOptimized(groupKey)
     end
 end
 
-function info = parseFilenameOptimized(filename)
-    % Comprehensive filename parsing - FIXED to avoid recursive calls
+function info = parseFilename(filename, config)
+    % Comprehensive filename parsing
     
     info = struct();
     info.filename = filename;
-    info.groupKey = extractGroupKeyOptimized(filename);
-    info.genotype = extractGenotypeOptimized(info.groupKey);
+    info.groupKey = extractGroupKey(filename, config);
+    info.genotype = extractGenotype(info.groupKey);
     
-    % Call the function directly to avoid recursive calls
+    % Use the internal function with config
     [info.trialNum, info.expType, info.ppiValue, info.coverslipCell] = ...
-        extractTrialInfoOptimized(filename);
+        extractTrialInfo(filename, config);
     
     info.isValid = ~isempty(info.groupKey) && ~isempty(info.expType);
 end

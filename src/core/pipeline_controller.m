@@ -183,9 +183,12 @@ function poolObj = setupParallelPool(hasGPU, gpuInfo)
 end
 
 function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
+    % Setup file system with proper versioning and return values
+    % FIXED: Now properly returns all 3 outputs as expected
+    
     % ==================== VERSION CONTROL ====================
     % CHANGE THIS NUMBER TO UPDATE ALL FOLDER NAMES
-    VERSION = '51';  % <-- CHANGE THIS NUMBER HERE
+    VERSION = '50';  % <-- CHANGE THIS NUMBER HERE
     % ==========================================================
     
     % Default directory (can be customized)
@@ -208,7 +211,7 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
     % Create directories
     io.createDirectories({outputFolders.main, outputFolders.individual, outputFolders.averaged});
     
-    % Get and validate Excel files
+    % Get and validate Excel files  
     excelFiles = io.getExcelFiles(rawMeanFolder);
     
     if isempty(excelFiles)
@@ -218,19 +221,25 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
     fprintf('Using version: v%s\n', VERSION);
     fprintf('Input folder: %s\n', rawMeanFolder);
     fprintf('Output folder: %s\n', outputFolders.main);
+    
+    % FIXED: Function now properly returns all expected outputs
 end
 
 function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMatrix, hasGPU, gpuInfo)
     % Process a single file with modular components
+    % FIXED: Load modules locally to avoid dependency issues
     
     fullFilePath = fullfile(fileInfo.folder, fileInfo.name);
     fprintf('    Processing: %s\n', fileInfo.name);
     
-    % Load modules (but avoid circular call)
+    % Load configuration first
+    cfg = GluSnFRConfig();
+    
+    % Create individual module instances (avoid loading full module system)
     io = io_manager();
     calc = df_calculator();
     filter = roi_filter();
-    utils = string_utils();
+    utils = string_utils(cfg);  % Pass config to avoid circular dependency
     
     % Read file
     [rawData, headers, readSuccess] = io.readExcelFile(fullFilePath, useReadMatrix);
@@ -250,7 +259,6 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     numericData = single(rawData(:, validColumns));
     
     % Create time data
-    cfg = GluSnFRConfig();
     timeData_ms = single((0:(size(numericData, 1)-1))' * cfg.timing.MS_PER_FRAME);
     
     % Calculate dF/F

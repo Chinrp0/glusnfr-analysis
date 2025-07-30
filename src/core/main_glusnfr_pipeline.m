@@ -6,14 +6,6 @@ function main_glusnfr_pipeline()
     %
     % Usage:
     %   main_glusnfr_pipeline()
-    %
-    % The function will:
-    % 1. Load all required modules
-    % 2. Setup system capabilities (GPU, parallel processing)
-    % 3. Guide user through folder selection
-    % 4. Process all groups automatically
-    % 5. Generate Excel outputs and plots
-    % 6. Provide comprehensive summary
     
     % Display banner
     fprintf('\n');
@@ -25,7 +17,12 @@ function main_glusnfr_pipeline()
     fprintf('\n');
     
     try
-        % Load the pipeline controller and run
+        % CRITICAL: Setup paths FIRST before loading any modules
+        fprintf('Setting up MATLAB paths...\n');
+        setupPipelinePaths();
+        
+        % Now load the pipeline controller and run
+        fprintf('Loading pipeline modules...\n');
         controller = pipeline_controller();
         controller.runMainPipeline();
         
@@ -53,4 +50,38 @@ function main_glusnfr_pipeline()
         
         rethrow(ME);
     end
+end
+
+function setupPipelinePaths()
+    % Setup all necessary paths for the modular pipeline
+    
+    % Get the directory where this script is located
+    [scriptDir, ~, ~] = fileparts(mfilename('fullpath'));
+    
+    % Navigate to project root (assuming this script is in src/core/)
+    projectRoot = fileparts(fileparts(scriptDir));
+    
+    % Add all necessary directories to path
+    pathsToAdd = {
+        fullfile(projectRoot, 'config'),
+        fullfile(projectRoot, 'src', 'core'),
+        fullfile(projectRoot, 'src', 'processing'), 
+        fullfile(projectRoot, 'src', 'io'),
+        fullfile(projectRoot, 'src', 'plotting'),
+        fullfile(projectRoot, 'src', 'utils'),
+        fullfile(projectRoot, 'src', 'analysis'),
+        fullfile(projectRoot, 'tests')
+    };
+    
+    % Add each path if it exists
+    for i = 1:length(pathsToAdd)
+        if exist(pathsToAdd{i}, 'dir')
+            addpath(pathsToAdd{i});
+            fprintf('  Added: %s\n', pathsToAdd{i});
+        else
+            warning('Directory not found: %s', pathsToAdd{i});
+        end
+    end
+    
+    fprintf('✓ All paths configured\n');
 end

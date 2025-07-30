@@ -1,32 +1,37 @@
 function modules = module_loader()
-    % MODULE_LOADER - Optimized central module loading system
+    % MODULE_LOADER - Central module loading system
     % 
-    % OPTIMIZED: Reduced redundancy and improved error handling
+    % Loads all pipeline modules in the correct order to avoid circular dependencies
     
     fprintf('Loading GluSnFR Analysis Pipeline modules...\n');
     
     try
-        % Load configuration first (required by other modules)
+        % Step 1: Load configuration FIRST (no dependencies)
+        fprintf('  Loading configuration...\n');
         modules.config = GluSnFRConfig();
         
-        % Load core processing modules (GPU/CPU optimized)
-        modules.calc = df_calculator();
-        modules.filter = roi_filter(); 
+        % Step 2: Load utility modules (pass config to avoid circular dependencies)
+        fprintf('  Loading utilities...\n');
+        modules.utils = string_utils(modules.config);  % Pass config to avoid circular dependency
         modules.memory = memory_manager();
         
-        % Load I/O and organization (consolidated)
-        modules.io = io_manager();  % Now handles ALL file operations
+        % Step 3: Load core processing modules
+        fprintf('  Loading processing modules...\n');
+        modules.calc = df_calculator();
+        modules.filter = roi_filter(); 
+        
+        % Step 4: Load I/O and organization modules
+        fprintf('  Loading I/O modules...\n');
+        modules.io = io_manager();
         modules.organize = data_organizer();
-        modules.plot = plot_generator();  % Fixed plotting module
+        modules.plot = plot_generator();
         
-        % Load utility modules
-        modules.utils = string_utils();
-        
-        % Load analysis and controller
+        % Step 5: Load analysis and controller
+        fprintf('  Loading analysis modules...\n');
         modules.analysis = experiment_analyzer();
         modules.controller = pipeline_controller();
         
-        % OPTIMIZED: Single validation pass
+        % Step 6: Validate all modules loaded correctly
         validateAllModules(modules);
         
         fprintf('✓ All modules loaded successfully (v%s)\n', modules.config.version);
@@ -37,9 +42,8 @@ function modules = module_loader()
 end
 
 function validateAllModules(modules)
-    % OPTIMIZED: Comprehensive module validation in one pass
+    % Validate that all required modules are loaded
     
-    % Required module fields
     requiredModules = {'config', 'calc', 'filter', 'memory', 'utils', ...
                       'io', 'organize', 'plot', 'analysis', 'controller'};
     
@@ -71,7 +75,7 @@ function testResults = runModuleTests(modules)
         assert(isfield(modules.config, 'version'), 'Config missing version');
         testResults(1) = true;
         
-        % Test 2: String utilities
+        % Test 2: String utilities (with config)
         testKey = modules.utils.extractGroupKey('CP_Ms_DIV13_Doc2b-WT1_Cs1-c1_1AP-1_bg_mean.xlsx');
         assert(~isempty(testKey), 'String extraction failed');
         testResults(2) = true;
