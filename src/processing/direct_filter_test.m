@@ -374,7 +374,7 @@ function signalPeriods = findSchmittTriggerSignals(trace, upperThresh, lowerThre
     
     % Start analysis from stimulus frame onwards
     analysisStart = max(1, stimFrame - 10);
-    analysisEnd = min(length(trace), stimFrame + 400);  % 2 seconds post-stimulus
+    analysisEnd = min(length(trace), stimFrame + 200);  % 1 seconds post-stimulus
     
     for i = analysisStart:analysisEnd
         if ~inSignal
