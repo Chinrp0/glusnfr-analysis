@@ -201,7 +201,7 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, plotsI
                 sgtitle(titleText, 'FontSize', 14, 'Interpreter', 'none', 'FontWeight', 'bold');
                 print(fig, fullfile(plotsIndividualFolder, plotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
                 plotsGenerated = plotsGenerated + 1;
-                fprintf('      ✓ Generated trial plot: %s\n', plotFile);
+                %fprintf('      ✓ Generated trial plot: %s\n', plotFile);
             end
             
             close(fig);
@@ -218,7 +218,7 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, plotsI
         plotsGenerated = plotsGenerated + avgPlotsGenerated;
     end
     
-    fprintf('    Generated %d plot files total\n', plotsGenerated);
+    fprintf('    Generated %d plot files for group: %s \n', plotsGenerated, groupKey);
 end
 
 
@@ -328,7 +328,7 @@ function numGenerated = generateAveragedPlots(averagedData, roiInfo, cleanGroupK
                 sgtitle(titleText, 'FontSize', 14, 'FontWeight', 'bold', 'Interpreter', 'none');
                 print(figAvg, fullfile(plotsFolder, avgPlotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
                 numGenerated = numGenerated + 1;
-                fprintf('      ✓ Generated averaged plot: %s\n', avgPlotFile);
+                %fprintf('      ✓ Generated averaged plot: %s\n', avgPlotFile);
             end
             
             close(figAvg);
