@@ -1,15 +1,13 @@
 function config = GluSnFRConfig()
     % GLUSNFRCONFIG - Enhanced configuration for GluSnFR analysis pipeline
     % 
-    % This centralizes all constants and parameters used throughout
-    % the analysis pipeline, eliminating magic numbers and making
-    % the code more maintainable.
+    % Updated with iGlu3Fast optimized parameters and enhanced filtering options
     
     %% Version Info
-    config.version = '53'; % Updated version
+    config.version = '54'; % Updated for enhanced filtering
     config.created = datestr(now, 'yyyy-mm-dd');
     
-    %% Timing Parameters (Previously scattered as magic numbers)
+    %% Timing Parameters
     config.timing = struct();
     config.timing.SAMPLING_RATE_HZ = 200;
     config.timing.MS_PER_FRAME = 5;
@@ -22,17 +20,43 @@ function config = GluSnFRConfig()
     config.thresholds = struct();
     config.thresholds.SD_MULTIPLIER = 3;
     config.thresholds.LOW_NOISE_CUTOFF = 0.02;
-    config.thresholds.HIGH_NOISE_MULTIPLIER = 1.5; % NOW USED in roi_filter.m
-    config.thresholds.DEFAULT_THRESHOLD = 0.02;     % USED in df_calculator.m
+    config.thresholds.HIGH_NOISE_MULTIPLIER = 1.5;
+    config.thresholds.DEFAULT_THRESHOLD = 0.02;
     config.thresholds.MIN_F0 = 1e-6;
     
-    %% NEW: Filtering Parameters (to eliminate more hardcoded values)
+    %% ENHANCED: Filtering Parameters for iGlu3Fast
     config.filtering = struct();
-    config.filtering.THRESHOLD_PERCENTAGE_1AP = 1.0;  % % of threshold for 1AP
-    config.filtering.THRESHOLD_PERCENTAGE_PPF = 1.0;  % % of threshold for PPF
-    config.filtering.MIN_RESPONSE_AMPLITUDE = 0.005;  % Minimum dF/F amplitude
-    config.filtering.MAX_BASELINE_NOISE = 0.05;       % Maximum baseline noise
-    config.filtering.ENABLE_DUPLICATE_REMOVAL = false; % Currently disabled
+    
+    % Basic filtering (existing)
+    config.filtering.THRESHOLD_PERCENTAGE_1AP = 1.0;
+    config.filtering.THRESHOLD_PERCENTAGE_PPF = 1.0;
+    config.filtering.MIN_RESPONSE_AMPLITUDE = 0.005;
+    config.filtering.MAX_BASELINE_NOISE = 0.05;
+    config.filtering.ENABLE_DUPLICATE_REMOVAL = false;
+    
+    % NEW: Enhanced filtering for iGlu3Fast ultrafast kinetics
+    config.filtering.ENABLE_ENHANCED_FILTERING = true;    % Enable enhanced filtering
+    config.filtering.ENABLE_TEMPORAL_VALIDATION = true;   % Temporal characteristics
+    config.filtering.ENABLE_KINETIC_ANALYSIS = true;      % Kinetic validation
+    config.filtering.ENABLE_COMPARISON_MODE = true;       % Compare with original
+    
+    % NEW: Temporal validation parameters (optimized for iGlu3Fast)
+    config.filtering.MIN_RISE_TIME_MS = 2;                % Faster than iGluSnFR3 (ultrafast)
+    config.filtering.MAX_RISE_TIME_MS = 25;               % Very fast response (was 50ms for iGluSnFR3)
+    config.filtering.RESPONSE_WINDOW_FRAMES = 20;         % 100ms post-stimulus window
+    config.filtering.MIN_SNR = 2.0;                       % Signal-to-noise ratio requirement
+    
+    % NEW: Kinetic analysis parameters (based on k-2 = 304 s^-1)
+    config.filtering.EXPECTED_DECAY_TIME_MS = 3.3;        % τ = 1/304 ≈ 3.3ms
+    config.filtering.MAX_DECAY_TIME_CONSTANT_MS = 15;     % Allow up to 5× expected
+    config.filtering.MAX_DECAY_RATIO = 0.7;               % Should decay to <70% of peak
+    config.filtering.MAX_DECAY_FRAMES = 10;               % 50ms maximum decay analysis
+    config.filtering.MIN_RISE_RATE = 0.001;               % Minimum dF/F per frame rise rate
+    
+    % NEW: Peak characteristics (iGlu3Fast specific)
+    config.filtering.MIN_PEAK_WIDTH_MS = 5;               % Minimum signal duration
+    config.filtering.MAX_PEAK_WIDTH_MS = 50;              % Maximum signal duration (ultrafast)
+    config.filtering.PEAK_SHARPNESS_THRESHOLD = 0.5;      % Peak sharpness requirement
     
     %% Processing Parameters
     config.processing = struct();
@@ -69,9 +93,10 @@ function config = GluSnFRConfig()
     config.validation.MAX_ROI_NUMBER = 1200;
     config.validation.MIN_BASELINE_FRAMES = 100;
     
-    %% NEW: Debug and Logging
+    %% Debug and Logging
     config.debug = struct();
     config.debug.VERBOSE_FILTERING = true;
     config.debug.SAVE_INTERMEDIATE_RESULTS = false;
     config.debug.PLOT_THRESHOLD_DISTRIBUTION = false;
+    config.debug.SAVE_FILTERING_COMPARISON = true;        % NEW: Save comparison results
 end

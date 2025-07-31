@@ -1,17 +1,109 @@
 function filter = roi_filter()
-    % ROI_FILTER - Fixed ROI filtering with proper configuration usage
+    % ROI_FILTER - Enhanced ROI filtering with iGlu3Fast optimization
     % 
-    % FIXED: All configuration parameters now properly used
-    % ENHANCED: Additional configurable parameters for fine-tuning
+    % UPDATED: Now includes enhanced filtering optimized for iGlu3Fast kinetics
+    % Can switch between original and enhanced methods via configuration
     
-    filter.filterROIs = @filterROIsAdaptive;
+    filter.filterROIs = @filterROIsMain;
+    filter.filterROIsOriginal = @filterROIsAdaptive;  % Your original method
+    filter.filterROIsEnhanced = @filterROIsEnhancedWrapper;  % New enhanced method
+    filter.compareFilteringMethods = @compareFilteringWrapper;
     filter.calculateAdaptiveThresholds = @calculateAdaptiveThresholds;
     filter.classifyNoiseLevel = @classifyNoiseLevel;
     filter.getStimulusResponse = @getStimulusResponse;
 end
 
+function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsMain(dF_values, headers, thresholds, experimentType, varargin)
+    % Main filtering function - chooses method based on configuration
+    
+    cfg = GluSnFRConfig();
+    
+    % Check if enhanced filtering is enabled
+    if isfield(cfg.filtering, 'ENABLE_ENHANCED_FILTERING') && cfg.filtering.ENABLE_ENHANCED_FILTERING
+        % Use enhanced filtering
+        if cfg.debug.VERBOSE_FILTERING
+            fprintf('    Using enhanced filtering (iGlu3Fast optimized)\n');
+        end
+        
+        try
+            enhanced_filter = enhanced_filtering_system();
+            [filteredData, filteredHeaders, filteredThresholds, stats] = ...
+                enhanced_filter.filterROIsEnhanced(dF_values, headers, thresholds, experimentType, varargin{:});
+            
+            % Add method info to stats
+            stats.filtering_method = 'enhanced';
+            stats.optimized_for = 'iGlu3Fast';
+            
+        catch ME
+            if cfg.debug.VERBOSE_FILTERING
+                fprintf('    Enhanced filtering failed (%s), using original method\n', ME.message);
+            end
+            [filteredData, filteredHeaders, filteredThresholds, stats] = ...
+                filterROIsAdaptive(dF_values, headers, thresholds, experimentType, varargin{:});
+            stats.filtering_method = 'original_fallback';
+        end
+        
+    else
+        % Use original filtering
+        if cfg.debug.VERBOSE_FILTERING
+            fprintf('    Using original filtering method\n');
+        end
+        [filteredData, filteredHeaders, filteredThresholds, stats] = ...
+            filterROIsAdaptive(dF_values, headers, thresholds, experimentType, varargin{:});
+        stats.filtering_method = 'original';
+    end
+    
+    % Optional: Save comparison if enabled
+    if isfield(cfg.debug, 'SAVE_FILTERING_COMPARISON') && cfg.debug.SAVE_FILTERING_COMPARISON && ...
+       isfield(cfg.filtering, 'ENABLE_COMPARISON_MODE') && cfg.filtering.ENABLE_COMPARISON_MODE
+        
+        try
+            % Run both methods for comparison (if not already done)
+            if ~strcmp(stats.filtering_method, 'enhanced')
+                enhanced_filter = enhanced_filtering_system();
+                [~, ~, ~, enhancedStats] = enhanced_filter.filterROIsEnhanced(dF_values, headers, thresholds, experimentType, varargin{:});
+                stats.comparison_with_enhanced = enhancedStats;
+            end
+        catch
+            % Silently fail comparison if enhanced filtering not available
+        end
+    end
+end
+
+function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsEnhancedWrapper(dF_values, headers, thresholds, experimentType, varargin)
+    % Wrapper to call enhanced filtering system
+    
+    try
+        enhanced_filter = enhanced_filtering_system();
+        [filteredData, filteredHeaders, filteredThresholds, stats] = ...
+            enhanced_filter.filterROIsEnhanced(dF_values, headers, thresholds, experimentType, varargin{:});
+    catch ME
+        fprintf('Enhanced filtering failed: %s. Using original method.', ME.message);
+        [filteredData, filteredHeaders, filteredThresholds, stats] = ...
+            filterROIsAdaptive(dF_values, headers, thresholds, experimentType, varargin{:});
+        stats.filtering_method = 'original_fallback';
+        stats.enhanced_error = ME.message;
+    end
+end
+
+function comparison = compareFilteringWrapper(dF_values, headers, thresholds, experimentType, varargin)
+    % Wrapper to call enhanced filtering comparison
+    
+    try
+        enhanced_filter = enhanced_filtering_system();
+        comparison = enhanced_filter.compareFilteringMethods(dF_values, headers, thresholds, experimentType, varargin{:});
+    catch ME
+        error('Enhanced filtering comparison failed: %s', ME.message);
+    end
+end
+
+%% ========================================================================
+%% ORIGINAL FILTERING METHOD (Your existing code)
+%% ========================================================================
+
 function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsAdaptive(dF_values, headers, thresholds, experimentType, varargin)
-    % FIXED: ROI filtering that properly uses all configuration parameters
+    % ORIGINAL: ROI filtering that properly uses all configuration parameters
+    % This is your existing working method
     
     cfg = GluSnFRConfig();
     
@@ -23,21 +115,21 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     end
     
     if cfg.debug.VERBOSE_FILTERING
-        fprintf('    Filtering ROIs: %s experiment\n', experimentType);
+        fprintf('    Filtering ROIs: %s experiment (original method)\n', experimentType);
     end
     
-    % FIXED: More lenient initial cleanup
+    % More lenient initial cleanup
     [dF_values, headers, thresholds] = removeEmptyROIs(dF_values, headers, thresholds, cfg);
     
-    % CONFIGURABLE: Duplicate removal (currently disabled in config)
+    % Configurable duplicate removal (currently disabled in config)
     if cfg.filtering.ENABLE_DUPLICATE_REMOVAL
         [dF_values, headers, thresholds] = removeDuplicateROIs(dF_values, headers, thresholds, cfg);
     end
     
-    % FIXED: Use configuration parameters for adaptive thresholds
+    % Use configuration parameters for adaptive thresholds
     [adaptiveThresholds, noiseClassification] = calculateAdaptiveThresholds(thresholds, cfg);
     
-    % FIXED: Apply stimulus response filtering with configurable parameters
+    % Apply stimulus response filtering with configurable parameters
     if isPPF
         responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms, cfg);
     else
@@ -53,17 +145,17 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     stats = generateFilteringStats(headers, responseFilter, noiseClassification, experimentType, cfg);
     
     if cfg.debug.VERBOSE_FILTERING
-        fprintf('    Filtering complete: %d/%d ROIs passed (%s)\n', ...
+        fprintf('    Original filtering complete: %d/%d ROIs passed (%s)\n', ...
                 length(filteredHeaders), length(headers), experimentType);
     end
 end
 
 function [adaptiveThresholds, noiseClassification] = calculateAdaptiveThresholds(baseThresholds, cfg)
-    % FIXED: Use configuration parameters instead of hardcoded values
+    % Use configuration parameters instead of hardcoded values
     
     lowNoiseROIs = baseThresholds <= cfg.thresholds.LOW_NOISE_CUTOFF;
     
-    % FIXED: Use cfg.thresholds.HIGH_NOISE_MULTIPLIER instead of hardcoded 1.5
+    % Use cfg.thresholds.HIGH_NOISE_MULTIPLIER instead of hardcoded 1.5
     adaptiveThresholds = baseThresholds;
     adaptiveThresholds(~lowNoiseROIs) = cfg.thresholds.HIGH_NOISE_MULTIPLIER * baseThresholds(~lowNoiseROIs);
     
@@ -78,18 +170,18 @@ function [adaptiveThresholds, noiseClassification] = calculateAdaptiveThresholds
 end
 
 function responseFilter = apply1APFiltering(dF_values, thresholds, cfg)
-    % FIXED: Use configurable threshold percentage from config
+    % Use configurable threshold percentage from config
     
     stimulusFrame = cfg.timing.STIMULUS_FRAME;
     postWindow = cfg.timing.POST_STIMULUS_WINDOW;
     
     maxResponses = getStimulusResponse(dF_values, stimulusFrame, postWindow);
     
-    % FIXED: Use configuration parameter instead of hardcoded 0.7
+    % Use configuration parameter instead of hardcoded 0.7
     thresholdPercentage = cfg.filtering.THRESHOLD_PERCENTAGE_1AP;
     responseFilter = maxResponses >= (thresholdPercentage * thresholds) & isfinite(maxResponses);
     
-    % ENHANCED: Additional filtering based on minimum response amplitude
+    % Additional filtering based on minimum response amplitude
     if isfield(cfg.filtering, 'MIN_RESPONSE_AMPLITUDE')
         amplitudeFilter = maxResponses >= cfg.filtering.MIN_RESPONSE_AMPLITUDE;
         responseFilter = responseFilter & amplitudeFilter;
@@ -102,7 +194,7 @@ function responseFilter = apply1APFiltering(dF_values, thresholds, cfg)
 end
 
 function responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms, cfg)
-    % FIXED: Use configurable threshold percentage from config
+    % Use configurable threshold percentage from config
     
     stimulusFrame1 = cfg.timing.STIMULUS_FRAME;
     stimulusFrame2 = stimulusFrame1 + round(timepoint_ms / cfg.timing.MS_PER_FRAME);
@@ -111,13 +203,13 @@ function responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms,
     maxResponses1 = getStimulusResponse(dF_values, stimulusFrame1, postWindow);
     maxResponses2 = getStimulusResponse(dF_values, stimulusFrame2, postWindow);
     
-    % FIXED: Use configuration parameter instead of hardcoded 0.6
+    % Use configuration parameter instead of hardcoded 0.6
     thresholdPercentage = cfg.filtering.THRESHOLD_PERCENTAGE_PPF;
     response1Filter = maxResponses1 >= (thresholdPercentage * thresholds) & isfinite(maxResponses1);
     response2Filter = maxResponses2 >= (thresholdPercentage * thresholds) & isfinite(maxResponses2);
     responseFilter = response1Filter | response2Filter;
     
-    % ENHANCED: Additional filtering based on minimum response amplitude
+    % Additional filtering based on minimum response amplitude
     if isfield(cfg.filtering, 'MIN_RESPONSE_AMPLITUDE')
         amplitude1Filter = maxResponses1 >= cfg.filtering.MIN_RESPONSE_AMPLITUDE;
         amplitude2Filter = maxResponses2 >= cfg.filtering.MIN_RESPONSE_AMPLITUDE;
@@ -145,12 +237,12 @@ function maxResponse = getStimulusResponse(dF_values, stimulusFrame, postWindow)
 end
 
 function [cleanData, cleanHeaders, cleanThresholds] = removeEmptyROIs(dF_values, headers, thresholds, cfg)
-    % ENHANCED: Remove empty ROIs with configurable noise threshold
+    % Remove empty ROIs with configurable noise threshold
     
     % Basic empty check
     nonEmptyROIs = ~all(isnan(dF_values), 1) & var(dF_values, 0, 1, 'omitnan') > 0;
     
-    % ENHANCED: Additional noise-based filtering if configured
+    % Additional noise-based filtering if configured
     if isfield(cfg.filtering, 'MAX_BASELINE_NOISE')
         baselineWindow = cfg.timing.BASELINE_FRAMES;
         baselineNoise = std(dF_values(baselineWindow, :), 0, 1, 'omitnan');
@@ -173,8 +265,7 @@ function [cleanData, cleanHeaders, cleanThresholds] = removeEmptyROIs(dF_values,
 end
 
 function [cleanData, cleanHeaders, cleanThresholds] = removeDuplicateROIs(dF_values, headers, thresholds, cfg)
-    % PLACEHOLDER: Duplicate ROI removal (could be implemented if needed)
-    % Currently just returns input data unchanged
+    % Duplicate ROI removal (placeholder - currently disabled)
     
     cleanData = dF_values;
     cleanHeaders = headers;
