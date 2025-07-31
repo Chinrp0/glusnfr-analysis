@@ -17,7 +17,14 @@ function config = GluSnFRConfig()
     config.timing.STIMULUS_TIME_MS = 1335; % 267 * 5ms
     config.timing.BASELINE_FRAMES = 1:200;
     config.timing.POST_STIMULUS_WINDOW = 30; % 150ms
-    
+
+    %% NEW: Rolling Median Baseline Correction
+    config.baseline = struct();
+    config.baseline.METHOD = 'rolling_median';     % Switch from 'traditional'
+    config.baseline.WINDOW_SIZE_MS = 300;          % Optimal for iGluSnFR3
+    config.baseline.OUTLIER_THRESHOLD = 1.5;       % Conservative artifact detection
+    config.baseline.MAX_ITERATIONS = 5;            % Iterative refinement
+
     %% Threshold Parameters  
     config.thresholds = struct();
     config.thresholds.SD_MULTIPLIER = 3;

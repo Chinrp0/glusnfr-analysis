@@ -319,7 +319,9 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     timeData_ms = single((0:(size(numericData, 1)-1))' * cfg.timing.MS_PER_FRAME);
     
     % Calculate dF/F
-    [dF_values, thresholds, gpuUsed] = calc.calculate(numericData, hasGPU, gpuInfo);
+    cfg = GluSnFRConfig();
+    [dF_values, thresholds, gpuUsed] = calc.calculate(numericData, hasGPU, gpuInfo, ...
+        'Method', cfg.baseline.METHOD, 'WindowSizeMs', cfg.baseline.WINDOW_SIZE_MS);
     
     % Extract experiment info
     [trialNum, expType, ppiValue, coverslipCell] = utils.extractTrialOrPPI(fileInfo.name);
