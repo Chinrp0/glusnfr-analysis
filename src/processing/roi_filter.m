@@ -1,109 +1,182 @@
 function filter = roi_filter()
-    % ROI_FILTER - Enhanced ROI filtering with iGlu3Fast optimization
+    % ROI_FILTER - Enhanced with simple signal quality filtering
     % 
-    % UPDATED: Now includes enhanced filtering optimized for iGlu3Fast kinetics
-    % Can switch between original and enhanced methods via configuration
+    % Now includes simple enhanced filtering to remove noise like ROI 19
+    % while keeping real signals like ROI 29 & 32
     
     filter.filterROIs = @filterROIsMain;
-    filter.filterROIsOriginal = @filterROIsAdaptive;  % Your original method
-    filter.filterROIsEnhanced = @filterROIsEnhancedWrapper;  % New enhanced method
-    filter.compareFilteringMethods = @compareFilteringWrapper;
+    filter.filterROIsOriginal = @filterROIsOriginal;
     filter.calculateAdaptiveThresholds = @calculateAdaptiveThresholds;
     filter.classifyNoiseLevel = @classifyNoiseLevel;
     filter.getStimulusResponse = @getStimulusResponse;
 end
 
 function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsMain(dF_values, headers, thresholds, experimentType, varargin)
-    % Main filtering function - chooses method based on configuration
+    % Main filtering function - chooses between original and enhanced
     
     cfg = GluSnFRConfig();
     
     % Check if enhanced filtering is enabled
     if isfield(cfg.filtering, 'ENABLE_ENHANCED_FILTERING') && cfg.filtering.ENABLE_ENHANCED_FILTERING
-        % Use enhanced filtering
         if cfg.debug.VERBOSE_FILTERING
-            fprintf('    Using enhanced filtering (iGlu3Fast optimized)\n');
+            fprintf('    Using simple enhanced filtering\n');
         end
         
         try
-            enhanced_filter = enhanced_filtering_system();
             [filteredData, filteredHeaders, filteredThresholds, stats] = ...
-                enhanced_filter.filterROIsEnhanced(dF_values, headers, thresholds, experimentType, varargin{:});
-            
-            % Add method info to stats
+                filterROIsEnhanced(dF_values, headers, thresholds, experimentType, varargin{:});
             stats.filtering_method = 'enhanced';
-            stats.optimized_for = 'iGlu3Fast';
             
         catch ME
             if cfg.debug.VERBOSE_FILTERING
-                fprintf('    Enhanced filtering failed (%s), using original method\n', ME.message);
+                fprintf('    Enhanced filtering failed (%s), using original\n', ME.message);
             end
             [filteredData, filteredHeaders, filteredThresholds, stats] = ...
-                filterROIsAdaptive(dF_values, headers, thresholds, experimentType, varargin{:});
+                filterROIsOriginal(dF_values, headers, thresholds, experimentType, varargin{:});
             stats.filtering_method = 'original_fallback';
         end
         
     else
         % Use original filtering
-        if cfg.debug.VERBOSE_FILTERING
-            fprintf('    Using original filtering method\n');
-        end
         [filteredData, filteredHeaders, filteredThresholds, stats] = ...
-            filterROIsAdaptive(dF_values, headers, thresholds, experimentType, varargin{:});
+            filterROIsOriginal(dF_values, headers, thresholds, experimentType, varargin{:});
         stats.filtering_method = 'original';
     end
+end
+
+function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsEnhanced(dF_values, headers, thresholds, experimentType, varargin)
+    % SIMPLIFIED enhanced filtering - 3 simple criteria to remove noise
     
-    % Optional: Save comparison if enabled
-    if isfield(cfg.debug, 'SAVE_FILTERING_COMPARISON') && cfg.debug.SAVE_FILTERING_COMPARISON && ...
-       isfield(cfg.filtering, 'ENABLE_COMPARISON_MODE') && cfg.filtering.ENABLE_COMPARISON_MODE
+    cfg = GluSnFRConfig();
+    
+    % Parse inputs
+    isPPF = strcmp(experimentType, 'PPF');
+    timepoint_ms = [];
+    if isPPF && ~isempty(varargin)
+        timepoint_ms = varargin{1};
+    end
+    
+    if cfg.debug.VERBOSE_FILTERING
+        fprintf('    Enhanced filtering: 3 simple criteria to remove noise\n');
+    end
+    
+    % STEP 1: Start with original filtering
+    [basicData, basicHeaders, basicThresholds, basicStats] = ...
+        filterROIsOriginal(dF_values, headers, thresholds, experimentType, varargin{:});
+    
+    if isempty(basicData)
+        filteredData = basicData;
+        filteredHeaders = basicHeaders;
+        filteredThresholds = basicThresholds;
+        stats = basicStats;
+        stats.enhancement_applied = false;
+        return;
+    end
+    
+    % STEP 2: Apply 3 simple enhancement criteria
+    [n_frames, n_rois] = size(basicData);
+    enhancedMask = true(1, n_rois);
+    
+    stimFrame = cfg.timing.STIMULUS_FRAME;
+    baselineWindow = 1:min(stimFrame-10, 200);
+    postStimWindow = stimFrame + (1:30); % 150ms window
+    postStimWindow = postStimWindow(postStimWindow <= n_frames);
+    
+    criteria_stats = struct();
+    criteria_stats.snr_passed = 0;
+    criteria_stats.timing_passed = 0;
+    criteria_stats.prominence_passed = 0;
+    
+    for roi = 1:n_rois
+        trace = basicData(:, roi);
         
-        try
-            % Run both methods for comparison (if not already done)
-            if ~strcmp(stats.filtering_method, 'enhanced')
-                enhanced_filter = enhanced_filtering_system();
-                [~, ~, ~, enhancedStats] = enhanced_filter.filterROIsEnhanced(dF_values, headers, thresholds, experimentType, varargin{:});
-                stats.comparison_with_enhanced = enhancedStats;
-            end
-        catch
-            % Silently fail comparison if enhanced filtering not available
+        % CRITERION 1: Signal-to-Noise Ratio
+        % Real signals should have clear peaks above noise
+        baselineNoise = std(trace(baselineWindow), 'omitnan');
+        if isempty(postStimWindow)
+            peakValue = 0;
+        else
+            peakValue = max(trace(postStimWindow));
+        end
+        
+        if baselineNoise > 0
+            snr = peakValue / baselineNoise;
+        else
+            snr = 0;
+        end
+        
+        % SNR threshold: real signals should have SNR > 3
+        snr_pass = snr >= 3.0;
+        if snr_pass, criteria_stats.snr_passed = criteria_stats.snr_passed + 1; end
+        
+        % CRITERION 2: Peak Timing
+        % Real signals should peak within reasonable time after stimulus
+        if ~isempty(postStimWindow)
+            [~, peakIdx] = max(trace(postStimWindow));
+            peakFrame = postStimWindow(peakIdx);
+            timeToPeak_ms = (peakFrame - stimFrame) * cfg.timing.MS_PER_FRAME;
+        else
+            timeToPeak_ms = 999;
+        end
+        
+        % Timing threshold: peak should occur 5-100ms after stimulus
+        timing_pass = timeToPeak_ms >= 5 && timeToPeak_ms <= 100;
+        if timing_pass, criteria_stats.timing_passed = criteria_stats.timing_passed + 1; end
+        
+        % CRITERION 3: Peak Prominence
+        % Real signals should have peaks that clearly stand out
+        if ~isempty(postStimWindow)
+            baseline_mean = mean(trace(baselineWindow), 'omitnan');
+            peak_prominence = peakValue - baseline_mean;
+        else
+            peak_prominence = 0;
+        end
+        
+        % Prominence threshold: peak should be at least 2% above baseline
+        prominence_pass = peak_prominence >= 0.02;
+        if prominence_pass, criteria_stats.prominence_passed = criteria_stats.prominence_passed + 1; end
+        
+        % ROI passes if it meets at least 2 out of 3 criteria
+        criteriaScore = snr_pass + timing_pass + prominence_pass;
+        enhancedMask(roi) = criteriaScore >= 2;
+    end
+    
+    % Apply enhanced filtering
+    if any(enhancedMask)
+        filteredData = basicData(:, enhancedMask);
+        filteredHeaders = basicHeaders(enhancedMask);
+        filteredThresholds = basicThresholds(enhancedMask);
+    else
+        % Fallback to basic filtering if enhanced removes everything
+        filteredData = basicData;
+        filteredHeaders = basicHeaders;
+        filteredThresholds = basicThresholds;
+        if cfg.debug.VERBOSE_FILTERING
+            fprintf('    WARNING: Enhanced filter removed all ROIs, using basic\n');
         end
     end
-end
-
-function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsEnhancedWrapper(dF_values, headers, thresholds, experimentType, varargin)
-    % Wrapper to call enhanced filtering system
     
-    try
-        enhanced_filter = enhanced_filtering_system();
-        [filteredData, filteredHeaders, filteredThresholds, stats] = ...
-            enhanced_filter.filterROIsEnhanced(dF_values, headers, thresholds, experimentType, varargin{:});
-    catch ME
-        fprintf('Enhanced filtering failed: %s. Using original method.', ME.message);
-        [filteredData, filteredHeaders, filteredThresholds, stats] = ...
-            filterROIsAdaptive(dF_values, headers, thresholds, experimentType, varargin{:});
-        stats.filtering_method = 'original_fallback';
-        stats.enhanced_error = ME.message;
-    end
-end
-
-function comparison = compareFilteringWrapper(dF_values, headers, thresholds, experimentType, varargin)
-    % Wrapper to call enhanced filtering comparison
+    % Generate enhanced stats
+    stats = basicStats;
+    stats.enhancement_applied = true;
+    stats.basic_passed = n_rois;
+    stats.enhanced_passed = sum(enhancedMask);
+    stats.additional_removed = n_rois - sum(enhancedMask);
+    stats.criteria_stats = criteria_stats;
     
-    try
-        enhanced_filter = enhanced_filtering_system();
-        comparison = enhanced_filter.compareFilteringMethods(dF_values, headers, thresholds, experimentType, varargin{:});
-    catch ME
-        error('Enhanced filtering comparison failed: %s', ME.message);
+    if cfg.debug.VERBOSE_FILTERING
+        fprintf('    Enhanced: %d→%d ROIs (SNR:%d, Timing:%d, Prominence:%d)\n', ...
+                n_rois, stats.enhanced_passed, ...
+                criteria_stats.snr_passed, criteria_stats.timing_passed, criteria_stats.prominence_passed);
     end
 end
 
 %% ========================================================================
-%% ORIGINAL FILTERING METHOD (Your existing code)
+%% ORIGINAL FILTERING METHOD (unchanged)
 %% ========================================================================
 
-function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsAdaptive(dF_values, headers, thresholds, experimentType, varargin)
-    % ORIGINAL: ROI filtering that properly uses all configuration parameters
-    % This is your existing working method
+function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsOriginal(dF_values, headers, thresholds, experimentType, varargin)
+    % ORIGINAL: Your existing working method (unchanged)
     
     cfg = GluSnFRConfig();
     
@@ -155,11 +228,9 @@ function [adaptiveThresholds, noiseClassification] = calculateAdaptiveThresholds
     
     lowNoiseROIs = baseThresholds <= cfg.thresholds.LOW_NOISE_CUTOFF;
     
-    % Use cfg.thresholds.HIGH_NOISE_MULTIPLIER instead of hardcoded 1.5
     adaptiveThresholds = baseThresholds;
     adaptiveThresholds(~lowNoiseROIs) = cfg.thresholds.HIGH_NOISE_MULTIPLIER * baseThresholds(~lowNoiseROIs);
     
-    % Create noise classification map
     noiseClassification = repmat({'high'}, size(baseThresholds));
     noiseClassification(lowNoiseROIs) = {'low'};
     
@@ -177,11 +248,9 @@ function responseFilter = apply1APFiltering(dF_values, thresholds, cfg)
     
     maxResponses = getStimulusResponse(dF_values, stimulusFrame, postWindow);
     
-    % Use configuration parameter instead of hardcoded 0.7
     thresholdPercentage = cfg.filtering.THRESHOLD_PERCENTAGE_1AP;
     responseFilter = maxResponses >= (thresholdPercentage * thresholds) & isfinite(maxResponses);
     
-    % Additional filtering based on minimum response amplitude
     if isfield(cfg.filtering, 'MIN_RESPONSE_AMPLITUDE')
         amplitudeFilter = maxResponses >= cfg.filtering.MIN_RESPONSE_AMPLITUDE;
         responseFilter = responseFilter & amplitudeFilter;
@@ -203,13 +272,11 @@ function responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms,
     maxResponses1 = getStimulusResponse(dF_values, stimulusFrame1, postWindow);
     maxResponses2 = getStimulusResponse(dF_values, stimulusFrame2, postWindow);
     
-    % Use configuration parameter instead of hardcoded 0.6
     thresholdPercentage = cfg.filtering.THRESHOLD_PERCENTAGE_PPF;
     response1Filter = maxResponses1 >= (thresholdPercentage * thresholds) & isfinite(maxResponses1);
     response2Filter = maxResponses2 >= (thresholdPercentage * thresholds) & isfinite(maxResponses2);
     responseFilter = response1Filter | response2Filter;
     
-    % Additional filtering based on minimum response amplitude
     if isfield(cfg.filtering, 'MIN_RESPONSE_AMPLITUDE')
         amplitude1Filter = maxResponses1 >= cfg.filtering.MIN_RESPONSE_AMPLITUDE;
         amplitude2Filter = maxResponses2 >= cfg.filtering.MIN_RESPONSE_AMPLITUDE;
@@ -239,10 +306,8 @@ end
 function [cleanData, cleanHeaders, cleanThresholds] = removeEmptyROIs(dF_values, headers, thresholds, cfg)
     % Remove empty ROIs with configurable noise threshold
     
-    % Basic empty check
     nonEmptyROIs = ~all(isnan(dF_values), 1) & var(dF_values, 0, 1, 'omitnan') > 0;
     
-    % Additional noise-based filtering if configured
     if isfield(cfg.filtering, 'MAX_BASELINE_NOISE')
         baselineWindow = cfg.timing.BASELINE_FRAMES;
         baselineNoise = std(dF_values(baselineWindow, :), 0, 1, 'omitnan');
@@ -306,10 +371,9 @@ function stats = generateFilteringStats(originalHeaders, responseFilter, noiseCl
         stats.highNoiseROIs = stats.passedROIs;
     end
     
-    stats.summary = sprintf('%s: %d/%d ROIs passed (%.1f%%), %d low noise, %d high noise [thresh=%.0f%%, mult=%.1fx]', ...
+    stats.summary = sprintf('%s: %d/%d ROIs passed (%.1f%%), %d low noise, %d high noise', ...
         experimentType, stats.passedROIs, stats.totalROIs, stats.filterRate*100, ...
-        stats.lowNoiseROIs, stats.highNoiseROIs, ...
-        stats.configUsed.thresholdPercentage*100, stats.configUsed.highNoiseMultiplier);
+        stats.lowNoiseROIs, stats.highNoiseROIs);
 end
 
 function noiseLevel = classifyNoiseLevel(threshold, cfg)

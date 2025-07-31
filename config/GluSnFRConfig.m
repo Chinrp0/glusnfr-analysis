@@ -1,10 +1,11 @@
 function config = GluSnFRConfig()
-    % GLUSNFRCONFIG - Enhanced configuration for GluSnFR analysis pipeline
+    % GLUSNFRCONFIG - Simplified configuration for GluSnFR analysis pipeline
     % 
-    % Updated with iGlu3Fast optimized parameters and enhanced filtering options
+    % SIMPLIFIED: Removed complex enhanced filtering parameters
+    % Added simple enhanced filtering toggle
     
     %% Version Info
-    config.version = '54'; % Updated for enhanced filtering
+    config.version = '55'; % Updated for simplified enhanced filtering
     config.created = datestr(now, 'yyyy-mm-dd');
     
     %% Timing Parameters
@@ -24,39 +25,25 @@ function config = GluSnFRConfig()
     config.thresholds.DEFAULT_THRESHOLD = 0.02;
     config.thresholds.MIN_F0 = 1e-6;
     
-    %% ENHANCED: Filtering Parameters for iGlu3Fast
+    %% Filtering Parameters (SIMPLIFIED)
     config.filtering = struct();
     
     % Basic filtering (existing)
     config.filtering.THRESHOLD_PERCENTAGE_1AP = 1.0;
     config.filtering.THRESHOLD_PERCENTAGE_PPF = 1.0;
-    config.filtering.MIN_RESPONSE_AMPLITUDE = 0.005;
+    config.filtering.MIN_RESPONSE_AMPLITUDE = 0.01;
     config.filtering.MAX_BASELINE_NOISE = 0.05;
     config.filtering.ENABLE_DUPLICATE_REMOVAL = false;
     
-    % NEW: Enhanced filtering for iGlu3Fast ultrafast kinetics
-    config.filtering.ENABLE_ENHANCED_FILTERING = true;    % Enable enhanced filtering
-    config.filtering.ENABLE_TEMPORAL_VALIDATION = true;   % Temporal characteristics
-    config.filtering.ENABLE_KINETIC_ANALYSIS = true;      % Kinetic validation
-    config.filtering.ENABLE_COMPARISON_MODE = true;       % Compare with original
+    % SIMPLE enhanced filtering toggle
+    config.filtering.ENABLE_ENHANCED_FILTERING = true;    % Enable simple enhanced filtering
     
-    % NEW: Temporal validation parameters (optimized for iGlu3Fast)
-    config.filtering.MIN_RISE_TIME_MS = 2;                % Faster than iGluSnFR3 (ultrafast)
-    config.filtering.MAX_RISE_TIME_MS = 25;               % Very fast response (was 50ms for iGluSnFR3)
-    config.filtering.RESPONSE_WINDOW_FRAMES = 20;         % 100ms post-stimulus window
-    config.filtering.MIN_SNR = 2.0;                       % Signal-to-noise ratio requirement
-    
-    % NEW: Kinetic analysis parameters (based on k-2 = 304 s^-1)
-    config.filtering.EXPECTED_DECAY_TIME_MS = 3.3;        % τ = 1/304 ≈ 3.3ms
-    config.filtering.MAX_DECAY_TIME_CONSTANT_MS = 15;     % Allow up to 5× expected
-    config.filtering.MAX_DECAY_RATIO = 0.7;               % Should decay to <70% of peak
-    config.filtering.MAX_DECAY_FRAMES = 10;               % 50ms maximum decay analysis
-    config.filtering.MIN_RISE_RATE = 0.001;               % Minimum dF/F per frame rise rate
-    
-    % NEW: Peak characteristics (iGlu3Fast specific)
-    config.filtering.MIN_PEAK_WIDTH_MS = 5;               % Minimum signal duration
-    config.filtering.MAX_PEAK_WIDTH_MS = 50;              % Maximum signal duration (ultrafast)
-    config.filtering.PEAK_SHARPNESS_THRESHOLD = 0.5;      % Peak sharpness requirement
+    % REMOVED: All the complex enhanced filtering parameters
+    % The simplified filter uses only 3 hardcoded criteria:
+    % 1. SNR >= 3.0
+    % 2. Peak timing 5-100ms after stimulus  
+    % 3. Peak prominence >= 2% above baseline
+    % ROI passes if it meets 2 out of 3 criteria
     
     %% Processing Parameters
     config.processing = struct();
@@ -69,7 +56,7 @@ function config = GluSnFRConfig()
     config.plotting = struct();
     config.plotting.MAX_PLOTS_PER_FIGURE = 12;
     config.plotting.DPI = 300;
-    config.plotting.Y_LIMITS = [-0.02, 0.1];
+    config.plotting.Y_LIMITS = [-0.02, 0.08];
     config.plotting.TRANSPARENCY = 0.7;
     
     %% Colors
@@ -98,5 +85,4 @@ function config = GluSnFRConfig()
     config.debug.VERBOSE_FILTERING = true;
     config.debug.SAVE_INTERMEDIATE_RESULTS = false;
     config.debug.PLOT_THRESHOLD_DISTRIBUTION = false;
-    config.debug.SAVE_FILTERING_COMPARISON = true;        % NEW: Save comparison results
 end
