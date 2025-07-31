@@ -621,14 +621,14 @@ function cfg = getConfig()
     cfg = GluSnFRConfig();  % Start with base config
     
     % Enhanced filtering parameters optimized for iGlu3Fast
-    cfg.filtering.MIN_RESPONSE_AMPLITUDE = 0.005;       % Minimum ΔF/F for valid response
-    cfg.filtering.MIN_RISE_TIME_MS = 2;                 % Faster than iGluSnFR3 (was 5ms)
-    cfg.filtering.MAX_RISE_TIME_MS = 25;                % Ultrafast kinetics (was 50ms)  
+    cfg.filtering.MIN_RESPONSE_AMPLITUDE = 0.01;       % Minimum ΔF/F for valid response
+    cfg.filtering.MIN_RISE_TIME_MS = 5;                 % Faster than iGluSnFR3 (was 5ms)
+    cfg.filtering.MAX_RISE_TIME_MS = 150;                % Ultrafast kinetics (was 50ms)  
     cfg.filtering.RESPONSE_WINDOW_FRAMES = 20;          % 100ms window post-stimulus
-    cfg.filtering.MIN_SNR = 2.0;                        % Signal-to-noise ratio
+    cfg.filtering.MIN_SNR = 2.5;                        % Signal-to-noise ratio
     
-    % iGlu3Fast specific decay parameters (k-2 = 304 s^-1 → τ ≈ 3.3ms)
-    cfg.filtering.EXPECTED_DECAY_TIME_MS = 3.3;         % From kinetic table
+    % iGlu3Fast specific decay parameters 
+    cfg.filtering.EXPECTED_DECAY_TIME_MS = 5;         % From kinetic table
     cfg.filtering.MAX_DECAY_TIME_CONSTANT_MS = 15;      % Allow up to 5x expected
     cfg.filtering.MAX_DECAY_RATIO = 0.7;                % Should decay to <70% of peak
     cfg.filtering.MAX_DECAY_FRAMES = 10;                % 50ms maximum decay analysis

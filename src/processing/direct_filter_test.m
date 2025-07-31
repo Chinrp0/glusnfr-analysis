@@ -556,32 +556,29 @@ end
 
 function cfg = getEnhancedConfig()
     % Get enhanced configuration using Schmitt trigger approach from literature
-    % Based on: 3.5σ upper threshold, 1.5σ lower threshold, decay-focused filtering
+    % Based on: 3.0σ upper threshold, 1.5σ lower threshold, decay-focused filtering
     
     cfg = GluSnFRConfig();  % Use your built-in configuration
     
     % SCHMITT TRIGGER PARAMETERS (from literature)
-    cfg.filtering.UPPER_THRESHOLD_SIGMA = 3.5;      % Signal starts when exceeds 3.5σ
-    cfg.filtering.LOWER_THRESHOLD_SIGMA = 1.5;      % Signal ends when decays below 1.5σ
-    cfg.filtering.MIN_SIGNAL_DURATION_MS = 10;      % Minimum signal duration (10ms)
+    cfg.filtering.UPPER_THRESHOLD_SIGMA = 3.0;      % Was 3.5 - easier to trigger signal start
+    cfg.filtering.LOWER_THRESHOLD_SIGMA = 1.5;      % Was 1.5 - signals can last longer
+    cfg.filtering.MIN_SIGNAL_DURATION_MS = 5;       % Was 10 - allow ultrafast responses
+    cfg.filtering.MIN_DECAY_RATIO = 0.1;             % Was 0.3 - much more permissive decay
+    cfg.filtering.MAX_ALLOWED_POST_PEAK_INCREASE = 0.5; % Was 0.2 - allow more noise after peak
+
     
     % DECAY-FOCUSED PARAMETERS (main filtering criterion)
     cfg.filtering.ENABLE_DECAY_ANALYSIS = true;     % Enable decay-based filtering
     cfg.filtering.MAX_DECAY_TIME_MS = 100;          % Maximum reasonable decay time
     cfg.filtering.MIN_DECAY_RATIO = 0.3;            % Should decay to at least 30% below peak
-    cfg.filtering.DECAY_ANALYSIS_WINDOW_MS = 150;   % Analysis window post-signal
+    cfg.filtering.DECAY_ANALYSIS_WINDOW_MS = 150;   % Analysis window post-signal\
+    cfg.filtering.MIN_SIGNAL_VARIANCE = 1e-6;        % Reject completely flat signals
     
-    % SENSOR KINETICS PARAMETERS (for flagging additional points)
-    cfg.filtering.PRE_SIGNAL_BUFFER_MS = 5;         % Buffer before signal start
-    cfg.filtering.POST_SIGNAL_BUFFER_MS = 20;       % Buffer after signal end
-    
-    % REMOVED PARAMETERS (not used in Schmitt trigger approach)
-    % - Rise time constraints removed (as requested)
-    % - Fixed amplitude thresholds removed (using σ-based instead)
-    % - SNR requirements removed (built into Schmitt trigger)
     
     % Use existing timing parameters from your config
     cfg.timing.MS_PER_FRAME = 5;  % 5ms per frame at 200Hz
+    cfg.timing.STIMULUS_FRAME = 267;
 end
 
 % Note: Using modules.utils.extractROINumbers instead of local function
