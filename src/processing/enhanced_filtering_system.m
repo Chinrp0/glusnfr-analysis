@@ -5,7 +5,7 @@ function enhanced_filter = enhanced_filtering_system()
     % kinetic analysis, and comparison with original filtering methods.
     % Optimized for iGlu3Fast ultrafast glutamate sensor kinetics.
     
-    enhanced_filter.filterROIsEnhanced = @filterROIsEnhanced;
+    enhanced_filter.filterROIs = @filterROIs;
     enhanced_filter.compareFilteringMethods = @compareFilteringMethods;
     enhanced_filter.validateTemporalCharacteristics = @validateTemporalCharacteristics;
     enhanced_filter.analyzeSignalKinetics = @analyzeSignalKinetics;
@@ -13,7 +13,7 @@ function enhanced_filter = enhanced_filtering_system()
     enhanced_filter.optimizeFilteringParameters = @optimizeFilteringParameters;
 end
 
-function [filteredData, filteredHeaders, filteredThresholds, enhancedStats] = filterROIsEnhanced(dF_values, headers, thresholds, experimentType, varargin)
+function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs(dF_values, headers, thresholds, experimentType, varargin)
     % Enhanced ROI filtering with temporal validation and kinetic analysis
     % Optimized for iGlu3Fast ultrafast kinetics
     
@@ -25,7 +25,7 @@ function [filteredData, filteredHeaders, filteredThresholds, enhancedStats] = fi
     addParameter(p, 'PPFTimepoint', [], @isnumeric);
     parse(p, varargin{:});
     
-    cfg = getEnhancedConfig();  % iGlu3Fast optimized parameters
+    cfg = getConfig();  % iGlu3Fast optimized parameters
     
     if p.Results.Verbose
         fprintf('    Enhanced filtering (iGlu3Fast optimized):\n');
@@ -34,17 +34,17 @@ function [filteredData, filteredHeaders, filteredThresholds, enhancedStats] = fi
     end
     
     % Start with basic filtering (your original method)
-    roi_filter = roi_filter();
+    filter_module = roi_filter();  % FIXED: Changed variable name
     [basicFiltered, basicHeaders, basicThresholds, basicStats] = ...
-        roi_filter.filterROIs(dF_values, headers, thresholds, experimentType, p.Results.PPFTimepoint);
+        filter_module.filterROIs(dF_values, headers, thresholds, experimentType, p.Results.PPFTimepoint);
     
     if isempty(basicFiltered)
         % Return empty if basic filtering removes everything
         filteredData = basicFiltered;
         filteredHeaders = basicHeaders;
         filteredThresholds = basicThresholds;
-        enhancedStats = basicStats;
-        enhancedStats.enhancement_applied = false;
+        stats = basicStats;
+        stats.enhancement_applied = false;
         return;
     end
     
@@ -52,20 +52,20 @@ function [filteredData, filteredHeaders, filteredThresholds, enhancedStats] = fi
     [n_frames, n_rois] = size(basicFiltered);
     enhancedMask = true(1, n_rois);  % Start with all ROIs from basic filtering
     
-    enhancedStats = basicStats;
-    enhancedStats.enhancement_applied = true;
-    enhancedStats.temporal_validation = struct();
-    enhancedStats.kinetic_analysis = struct();
-    enhancedStats.filtering_stages = struct();
+    stats = basicStats;
+    stats.enhancement_applied = true;
+    stats.temporal_validation = struct();
+    stats.kinetic_analysis = struct();
+    stats.filtering_stages = struct();
     
     % Stage 1: Temporal characteristics validation
     if p.Results.EnableTemporalValidation
         temporalMask = validateAllROIsTemporalCharacteristics(basicFiltered, basicHeaders, cfg, experimentType, p.Results.PPFTimepoint);
         enhancedMask = enhancedMask & temporalMask;
         
-        enhancedStats.temporal_validation.total_rois = n_rois;
-        enhancedStats.temporal_validation.passed_temporal = sum(temporalMask);
-        enhancedStats.temporal_validation.temporal_pass_rate = sum(temporalMask) / n_rois;
+        stats.temporal_validation.total_rois = n_rois;
+        stats.temporal_validation.passed_temporal = sum(temporalMask);
+        stats.temporal_validation.temporal_pass_rate = sum(temporalMask) / n_rois;
         
         if p.Results.Verbose
             fprintf('      Temporal validation: %d/%d ROIs passed (%.1f%%)\n', ...
@@ -78,14 +78,14 @@ function [filteredData, filteredHeaders, filteredThresholds, enhancedStats] = fi
         kineticMask = validateKineticCharacteristics(basicFiltered, basicHeaders, cfg, experimentType);
         enhancedMask = enhancedMask & kineticMask;
         
-        enhancedStats.kinetic_analysis.total_rois = sum(enhancedMask & ~kineticMask) + sum(kineticMask);
-        enhancedStats.kinetic_analysis.passed_kinetic = sum(kineticMask);
-        enhancedStats.kinetic_analysis.kinetic_pass_rate = sum(kineticMask) / enhancedStats.kinetic_analysis.total_rois;
+        stats.kinetic_analysis.total_rois = sum(enhancedMask & ~kineticMask) + sum(kineticMask);
+        stats.kinetic_analysis.passed_kinetic = sum(kineticMask);
+        stats.kinetic_analysis.kinetic_pass_rate = sum(kineticMask) / stats.kinetic_analysis.total_rois;
         
         if p.Results.Verbose
             fprintf('      Kinetic validation: %d/%d ROIs passed (%.1f%%)\n', ...
-                    sum(kineticMask), enhancedStats.kinetic_analysis.total_rois, ...
-                    enhancedStats.kinetic_analysis.kinetic_pass_rate*100);
+                    sum(kineticMask), stats.kinetic_analysis.total_rois, ...
+                    stats.kinetic_analysis.kinetic_pass_rate*100);
         end
     end
     
@@ -95,10 +95,10 @@ function [filteredData, filteredHeaders, filteredThresholds, enhancedStats] = fi
         filteredHeaders = basicHeaders(enhancedMask);
         filteredThresholds = basicThresholds(enhancedMask);
         
-        enhancedStats.filtering_stages.basic_pass = n_rois;
-        enhancedStats.filtering_stages.enhanced_pass = sum(enhancedMask);
-        enhancedStats.filtering_stages.enhancement_rate = sum(enhancedMask) / n_rois;
-        enhancedStats.filtering_stages.additional_filtering = n_rois - sum(enhancedMask);
+        stats.filtering_stages.basic_pass = n_rois;
+        stats.filtering_stages.pass = sum(enhancedMask);
+        stats.filtering_stages.rate = sum(enhancedMask) / n_rois;
+        stats.filtering_stages.additional_filtering = n_rois - sum(enhancedMask);
         
     else
         % If enhanced filtering removes everything, fall back to basic filtering
@@ -106,7 +106,7 @@ function [filteredData, filteredHeaders, filteredThresholds, enhancedStats] = fi
         filteredHeaders = basicHeaders;
         filteredThresholds = basicThresholds;
         
-        enhancedStats.filtering_stages.fallback_to_basic = true;
+        stats.filtering_stages.fallback_to_basic = true;
         
         if p.Results.Verbose
             fprintf('      WARNING: Enhanced filtering removed all ROIs, using basic filtering\n');
@@ -114,11 +114,11 @@ function [filteredData, filteredHeaders, filteredThresholds, enhancedStats] = fi
     end
     
     % Final statistics
-    enhancedStats.final_summary = sprintf('Enhanced: %d→%d ROIs (%s)', ...
+    stats.final_summary = sprintf('Enhanced: %d→%d ROIs (%s)', ...
         length(headers), length(filteredHeaders), experimentType);
     
     if p.Results.Verbose
-        fprintf('      %s\n', enhancedStats.final_summary);
+        fprintf('      %s\n', stats.final_summary);
     end
 end
 
@@ -137,33 +137,33 @@ function comparison = compareFilteringMethods(dF_values, headers, thresholds, ex
     
     % Run original filtering
     fprintf('1. Running original filtering...\n');
-    roi_filter = roi_filter();
+    filter_module = roi_filter();  % FIXED: Changed variable name
     [originalFiltered, originalHeaders, originalThresholds, originalStats] = ...
-        roi_filter.filterROIs(dF_values, headers, thresholds, experimentType, p.Results.PPFTimepoint);
+        filter_module.filterROIs(dF_values, headers, thresholds, experimentType, p.Results.PPFTimepoint);
     
     % Run enhanced filtering
     fprintf('2. Running enhanced filtering...\n');
-    enhanced_filter = enhanced_filtering_system();
-    [enhancedFiltered, enhancedHeaders, enhancedThresholds, enhancedStats] = ...
-        enhanced_filter.filterROIsEnhanced(dF_values, headers, thresholds, experimentType, ...
+    enhanced_filter_instance = enhanced_filtering_system();
+    [filteredData, filteredHeaders, filteredThresholds, stats] = ...
+        enhanced_filter_instance.filterROIs(dF_values, headers, thresholds, experimentType, ...
         'PPFTimepoint', p.Results.PPFTimepoint, 'Verbose', false);
     
     % Analysis
     comparison = struct();
     comparison.original = struct('count', length(originalHeaders), 'headers', originalHeaders, 'stats', originalStats);
-    comparison.enhanced = struct('count', length(enhancedHeaders), 'headers', enhancedHeaders, 'stats', enhancedStats);
+    comparison.enhanced = struct('count', length(filteredHeaders), 'headers', filteredHeaders, 'stats', stats);
     
     % ROI overlap analysis
-    [comparison.overlap, comparison.original_only, comparison.enhanced_only] = analyzeROIOverlap(originalHeaders, enhancedHeaders);
+    [comparison.overlap, comparison.original_only, comparison.enhanced_only] = analyzeROIOverlap(originalHeaders, filteredHeaders);
     
     % Known responder analysis (if provided)
     if ~isempty(p.Results.AnalyzeKnownResponders)
-        comparison.known_responders = analyzeKnownResponders(p.Results.AnalyzeKnownResponders, originalHeaders, enhancedHeaders);
+        comparison.known_responders = analyzeKnownResponders(p.Results.AnalyzeKnownResponders, originalHeaders, filteredHeaders);
     end
     
     % Performance metrics
     comparison.metrics = struct();
-    comparison.metrics.selectivity_improvement = (length(originalHeaders) - length(enhancedHeaders)) / length(originalHeaders);
+    comparison.metrics.selectivity_improvement = (length(originalHeaders) - length(filteredHeaders)) / length(originalHeaders);
     comparison.metrics.additional_filtering_rate = length(comparison.enhanced_only) / length(originalHeaders);
     
     % Display results
@@ -176,6 +176,16 @@ function comparison = compareFilteringMethods(dF_values, headers, thresholds, ex
     fprintf('Selectivity improvement: %.1f%% (enhanced removes %.1f%% more)\n', ...
             comparison.metrics.selectivity_improvement*100, abs(comparison.metrics.selectivity_improvement)*100);
     
+    % HIGHLIGHT THE ROIs THAT ENHANCED FILTER REMOVES
+    if ~isempty(comparison.original_only)
+        fprintf('\n=== ROIs REMOVED by Enhanced Filter ===\n');
+        fprintf('These %d ROIs passed original filtering but failed enhanced:\n', length(comparison.original_only));
+        for i = 1:length(comparison.original_only)
+            fprintf('  ROI %d\n', comparison.original_only(i));
+        end
+        fprintf('(These are potential false positives caught by enhanced filtering)\n');
+    end
+    
     if ~isempty(p.Results.AnalyzeKnownResponders)
         fprintf('\nKnown Responders Analysis:\n');
         fprintf('  Known responders provided: %d\n', length(p.Results.AnalyzeKnownResponders));
@@ -183,13 +193,13 @@ function comparison = compareFilteringMethods(dF_values, headers, thresholds, ex
                 comparison.known_responders.original_detected, length(p.Results.AnalyzeKnownResponders), ...
                 comparison.known_responders.original_detection_rate*100);
         fprintf('  Enhanced method detected: %d/%d (%.1f%%)\n', ...
-                comparison.known_responders.enhanced_detected, length(p.Results.AnalyzeKnownResponders), ...
-                comparison.known_responders.enhanced_detection_rate*100);
+                comparison.known_responders.detected, length(p.Results.AnalyzeKnownResponders), ...
+                comparison.known_responders.detection_rate*100);
     end
     
     % Generate plots
     if p.Results.PlotResults
-        plotFilteringComparison(dF_values, headers, originalHeaders, enhancedHeaders, comparison, experimentType);
+        plotFilteringComparison(dF_values, headers, originalHeaders, filteredHeaders, comparison, experimentType);
     end
     
     % Generate recommendations
@@ -337,11 +347,11 @@ function kineticMask = validateKineticCharacteristics(dF_values, headers, cfg, e
     
     for roi = 1:n_rois
         dF_trace = dF_values(:, roi);
-        kineticMask(roi) = analyzeROIKinetics(dF_trace, cfg);
+        kineticMask(roi) = analyzeSignalKinetics(dF_trace, cfg);
     end
 end
 
-function isValid = analyzeROIKinetics(dF_trace, cfg)
+function isValid = analyzeSignalKinetics(dF_trace, cfg)
     % Analyze individual ROI kinetics for iGlu3Fast compatibility
     
     stimFrame = cfg.timing.STIMULUS_FRAME;
@@ -418,16 +428,16 @@ function timeConstant = fitDecayTimeConstant(decayTrace, msPerFrame)
     timeConstant = -1 / p(1);  % tau = -1/slope
 end
 
-function [overlap, original_only, enhanced_only] = analyzeROIOverlap(originalHeaders, enhancedHeaders)
+function [overlap, original_only, enhanced_only] = analyzeROIOverlap(originalHeaders, filteredHeaders)
     % Analyze overlap between filtering methods
     
     % Extract ROI numbers
     originalROIs = extractROINumbers(originalHeaders);
-    enhancedROIs = extractROINumbers(enhancedHeaders);
+    filteredROIs = extractROINumbers(filteredHeaders);
     
-    overlap = intersect(originalROIs, enhancedROIs);
-    original_only = setdiff(originalROIs, enhancedROIs);
-    enhanced_only = setdiff(enhancedROIs, originalROIs);
+    overlap = intersect(originalROIs, filteredROIs);
+    original_only = setdiff(originalROIs, filteredROIs);
+    enhanced_only = setdiff(filteredROIs, originalROIs);
 end
 
 function roiNumbers = extractROINumbers(headers)
@@ -442,22 +452,22 @@ function roiNumbers = extractROINumbers(headers)
     end
 end
 
-function known_analysis = analyzeKnownResponders(knownROIs, originalHeaders, enhancedHeaders)
+function known_analysis = analyzeKnownResponders(knownROIs, originalHeaders, filteredHeaders)
     % Analyze detection of known responding ROIs
     
     originalROIs = extractROINumbers(originalHeaders);
-    enhancedROIs = extractROINumbers(enhancedHeaders);
+    filteredROIs = extractROINumbers(filteredHeaders);
     
     known_analysis = struct();
     known_analysis.original_detected = sum(ismember(knownROIs, originalROIs));
-    known_analysis.enhanced_detected = sum(ismember(knownROIs, enhancedROIs));
+    known_analysis.detected = sum(ismember(knownROIs, filteredROIs));
     known_analysis.original_detection_rate = known_analysis.original_detected / length(knownROIs);
-    known_analysis.enhanced_detection_rate = known_analysis.enhanced_detected / length(knownROIs);
+    known_analysis.detection_rate = known_analysis.detected / length(knownROIs);
     known_analysis.missed_by_original = setdiff(knownROIs, originalROIs);
-    known_analysis.missed_by_enhanced = setdiff(knownROIs, enhancedROIs);
+    known_analysis.missed_by_enhanced = setdiff(knownROIs, filteredROIs);
 end
 
-function plotFilteringComparison(dF_values, headers, originalHeaders, enhancedHeaders, comparison, experimentType)
+function plotFilteringComparison(dF_values, headers, originalHeaders, filteredHeaders, comparison, experimentType)
     % Create comprehensive filtering comparison plots
     
     figure('Position', [100, 100, 1600, 1200], 'Name', 'Enhanced Filtering Comparison');
@@ -466,18 +476,18 @@ function plotFilteringComparison(dF_values, headers, originalHeaders, enhancedHe
     
     % Get ROI categories
     originalROIs = extractROINumbers(originalHeaders);
-    enhancedROIs = extractROINumbers(enhancedHeaders);
+    filteredROIs = extractROINumbers(filteredHeaders);
     
     % Plot examples from each category
     plotROICategory(dF_values, headers, comparison.overlap, time_ms, 1, 'Both Methods Passed', 'green');
-    plotROICategory(dF_values, headers, comparison.original_only, time_ms, 2, 'Original Only', 'blue');
+    plotROICategory(dF_values, headers, comparison.original_only, time_ms, 2, 'Original Only (False Positives?)', 'red');
     plotROICategory(dF_values, headers, comparison.enhanced_only, time_ms, 3, 'Enhanced Only', 'orange');
     
     % Summary statistics
     subplot(2, 3, 4);
     categories = {'Overlap', 'Original Only', 'Enhanced Only'};
     counts = [length(comparison.overlap), length(comparison.original_only), length(comparison.enhanced_only)];
-    colors = [0.2 0.8 0.2; 0.2 0.2 0.8; 0.8 0.5 0.2];
+    colors = [0.2 0.8 0.2; 0.8 0.2 0.2; 0.8 0.5 0.2];
     
     bar(counts, 'FaceColor', 'flat', 'CData', colors);
     set(gca, 'XTickLabel', categories, 'XTickLabelRotation', 45);
@@ -489,12 +499,12 @@ function plotFilteringComparison(dF_values, headers, originalHeaders, enhancedHe
     subplot(2, 3, 5);
     allROIs = extractROINumbers(headers);
     originalMask = ismember(allROIs, originalROIs);
-    enhancedMask = ismember(allROIs, enhancedROIs);
+    filteredMask = ismember(allROIs, filteredROIs);
     
-    scatter(allROIs(originalMask & enhancedMask), ones(sum(originalMask & enhancedMask), 1)*3, 50, 'g', 'filled', 'DisplayName', 'Both');
+    scatter(allROIs(originalMask & filteredMask), ones(sum(originalMask & filteredMask), 1)*3, 50, 'g', 'filled', 'DisplayName', 'Both');
     hold on;
-    scatter(allROIs(originalMask & ~enhancedMask), ones(sum(originalMask & ~enhancedMask), 1)*2, 50, 'b', 'filled', 'DisplayName', 'Original Only');
-    scatter(allROIs(~originalMask & enhancedMask), ones(sum(~originalMask & enhancedMask), 1)*1, 50, 'r', 'filled', 'DisplayName', 'Enhanced Only');
+    scatter(allROIs(originalMask & ~filteredMask), ones(sum(originalMask & ~filteredMask), 1)*2, 50, 'r', 'filled', 'DisplayName', 'Original Only');
+    scatter(allROIs(~originalMask & filteredMask), ones(sum(~originalMask & filteredMask), 1)*1, 50, 'b', 'filled', 'DisplayName', 'Enhanced Only');
     
     xlabel('ROI Number');
     ylabel('Method');
@@ -596,7 +606,7 @@ function generateFilteringRecommendations(comparison)
     
     if isfield(comparison, 'known_responders')
         fprintf('\nKnown Responder Performance:\n');
-        if comparison.known_responders.enhanced_detection_rate >= comparison.known_responders.original_detection_rate
+        if comparison.known_responders.detection_rate >= comparison.known_responders.original_detection_rate
             fprintf('  ✓ Enhanced method maintains or improves detection\n');
         else
             fprintf('  ⚠ Enhanced method misses some known responders\n');
@@ -605,7 +615,7 @@ function generateFilteringRecommendations(comparison)
     end
 end
 
-function cfg = getEnhancedConfig()
+function cfg = getConfig()
     % Get configuration optimized for iGlu3Fast kinetics
     
     cfg = GluSnFRConfig();  % Start with base config
@@ -628,4 +638,13 @@ function cfg = getEnhancedConfig()
     cfg.filtering.ENABLE_TEMPORAL_VALIDATION = true;
     cfg.filtering.ENABLE_KINETIC_ANALYSIS = true;
     cfg.filtering.ENABLE_CONSISTENCY_CHECK = false;     % Requires multiple trials
+end
+
+% Placeholder functions for missing functionality
+function calculateTrialConsistency(varargin)
+    warning('calculateTrialConsistency not yet implemented');
+end
+
+function optimizeFilteringParameters(varargin)
+    warning('optimizeFilteringParameters not yet implemented');
 end
