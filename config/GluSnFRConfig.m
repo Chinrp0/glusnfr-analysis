@@ -1,12 +1,12 @@
 function config = GluSnFRConfig()
-    % GLUSNFRCONFIG - Configuration for GluSnFR analysis pipeline
+    % GLUSNFRCONFIG - Enhanced configuration for GluSnFR analysis pipeline
     % 
     % This centralizes all constants and parameters used throughout
     % the analysis pipeline, eliminating magic numbers and making
     % the code more maintainable.
     
     %% Version Info
-    config.version = '52';
+    config.version = '53'; % Updated version
     config.created = datestr(now, 'yyyy-mm-dd');
     
     %% Timing Parameters (Previously scattered as magic numbers)
@@ -22,9 +22,17 @@ function config = GluSnFRConfig()
     config.thresholds = struct();
     config.thresholds.SD_MULTIPLIER = 3;
     config.thresholds.LOW_NOISE_CUTOFF = 0.02;
-    config.thresholds.HIGH_NOISE_MULTIPLIER = 1.5;
-    config.thresholds.DEFAULT_THRESHOLD = 0.01;
+    config.thresholds.HIGH_NOISE_MULTIPLIER = 1.5; % NOW USED in roi_filter.m
+    config.thresholds.DEFAULT_THRESHOLD = 0.02;     % USED in df_calculator.m
     config.thresholds.MIN_F0 = 1e-6;
+    
+    %% NEW: Filtering Parameters (to eliminate more hardcoded values)
+    config.filtering = struct();
+    config.filtering.THRESHOLD_PERCENTAGE_1AP = 1.0;  % % of threshold for 1AP
+    config.filtering.THRESHOLD_PERCENTAGE_PPF = 1.0;  % % of threshold for PPF
+    config.filtering.MIN_RESPONSE_AMPLITUDE = 0.005;  % Minimum dF/F amplitude
+    config.filtering.MAX_BASELINE_NOISE = 0.05;       % Maximum baseline noise
+    config.filtering.ENABLE_DUPLICATE_REMOVAL = false; % Currently disabled
     
     %% Processing Parameters
     config.processing = struct();
@@ -37,7 +45,7 @@ function config = GluSnFRConfig()
     config.plotting = struct();
     config.plotting.MAX_PLOTS_PER_FIGURE = 12;
     config.plotting.DPI = 300;
-    config.plotting.Y_LIMITS = [-0.02, 0.08];
+    config.plotting.Y_LIMITS = [-0.02, 0.1];
     config.plotting.TRANSPARENCY = 0.7;
     
     %% Colors
@@ -60,4 +68,10 @@ function config = GluSnFRConfig()
     config.validation.MIN_FRAMES = 600;
     config.validation.MAX_ROI_NUMBER = 1200;
     config.validation.MIN_BASELINE_FRAMES = 100;
+    
+    %% NEW: Debug and Logging
+    config.debug = struct();
+    config.debug.VERBOSE_FILTERING = true;
+    config.debug.SAVE_INTERMEDIATE_RESULTS = false;
+    config.debug.PLOT_THRESHOLD_DISTRIBUTION = false;
 end

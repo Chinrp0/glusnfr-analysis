@@ -109,18 +109,17 @@ function runMainPipeline()
 end
 
 function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
-    % FIXED: Setup file system with proper return values and error handling
+    % FIXED: Setup file system with updated folder structure
     % 
-    % This function was failing because:
-    % 1. The original had return value mismatches
-    % 2. Excel file validation was too strict
-    % 3. Error handling was insufficient
+    % Changes:
+    % - Single plot folder "6_v53_dF_plots" 
+    % - 3 subfolders: ROI_trials, ROI_Averages, Coverslip_Averages
     
     fprintf('Setting up file system...\n');
     
     % ==================== VERSION CONTROL ====================
     % CHANGE THIS NUMBER TO UPDATE ALL FOLDER NAMES
-    VERSION = '52';  % <-- CHANGE THIS NUMBER HERE (incremented from 50)
+    VERSION = '53';  % <-- Updated version number
     % ==========================================================
     
     % Default directory (can be customized)
@@ -141,16 +140,27 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
     
     fprintf('Selected input folder: %s\n', rawMeanFolder);
     
-    % Create output folders with version variable
+    % Create output folders with new structure
     processedImagesFolder = fileparts(rawMeanFolder);
     outputFolders = struct();
     outputFolders.main = fullfile(processedImagesFolder, sprintf('6_v%s_dF_F', VERSION));
-    outputFolders.individual = fullfile(processedImagesFolder, sprintf('6_v%s_plots_trials', VERSION));
-    outputFolders.averaged = fullfile(processedImagesFolder, sprintf('6_v%s_plots_averaged', VERSION));
+    
+    % NEW: Single plot folder with 3 subfolders
+    plotsMainFolder = fullfile(processedImagesFolder, sprintf('6_v%s_dF_plots', VERSION));
+    outputFolders.plots_main = plotsMainFolder;
+    outputFolders.roi_trials = fullfile(plotsMainFolder, 'ROI_trials');
+    outputFolders.roi_averages = fullfile(plotsMainFolder, 'ROI_Averages');
+    outputFolders.coverslip_averages = fullfile(plotsMainFolder, 'Coverslip_Averages');
     
     % Create directories using the io manager
     fprintf('Creating output directories...\n');
-    io.createDirectories({outputFolders.main, outputFolders.individual, outputFolders.averaged});
+    io.createDirectories({
+        outputFolders.main, 
+        outputFolders.plots_main,
+        outputFolders.roi_trials, 
+        outputFolders.roi_averages, 
+        outputFolders.coverslip_averages
+    });
     
     % Get and validate Excel files with improved error handling
     fprintf('Scanning for Excel files...\n');
@@ -186,10 +196,11 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
     fprintf('File system setup complete!\n');
     fprintf('Input: %s (%d files)\n', rawMeanFolder, length(excelFiles));
     fprintf('Output: %s\n', outputFolders.main);
+    fprintf('Plots: %s\n', outputFolders.plots_main);
     
     % IMPORTANT: This function now properly returns all three expected outputs:
     % 1. rawMeanFolder - string path to input folder
-    % 2. outputFolders - struct with .main, .individual, .averaged fields  
+    % 2. outputFolders - struct with updated folder structure
     % 3. excelFiles - struct array of file information
 end
 
@@ -391,7 +402,7 @@ end
 
 function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGroup, ...
                                                rawMeanFolder, outputFolders, hasGPU, gpuInfo, modules)
-    % Process a single group
+    % Process a single group - UPDATED for new folder structure
     
     groupTimer = tic;
     result = struct('status', 'processing', 'groupKey', groupKey, 'numFiles', length(filesInGroup));
@@ -415,9 +426,14 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
         % Save results using consolidated io manager
         modules.io.writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, outputFolders.main);
         
-        % Generate plots
-        modules.plot.generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, ...
-                                       outputFolders.individual, outputFolders.averaged);
+        % UPDATED: Generate plots with new folder structure
+        % Pass the plot-specific folders instead of individual/averaged
+        plotFolders = struct();
+        plotFolders.roi_trials = outputFolders.roi_trials;
+        plotFolders.roi_averages = outputFolders.roi_averages;
+        plotFolders.coverslip_averages = outputFolders.coverslip_averages;
+        
+        modules.plot.generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, plotFolders);
         
         result = prepareGroupResult(groupData, groupMetadata, roiInfo, 'success');
         result.groupKey = groupKey;

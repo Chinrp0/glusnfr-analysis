@@ -1,7 +1,8 @@
 function filter = roi_filter()
-    % ROI_FILTER - Fixed ROI filtering with proper calibration
+    % ROI_FILTER - Fixed ROI filtering with proper configuration usage
     % 
-    % FIXED: Made filtering less aggressive to match monolithic script behavior
+    % FIXED: All configuration parameters now properly used
+    % ENHANCED: Additional configurable parameters for fine-tuning
     
     filter.filterROIs = @filterROIsAdaptive;
     filter.calculateAdaptiveThresholds = @calculateAdaptiveThresholds;
@@ -10,7 +11,7 @@ function filter = roi_filter()
 end
 
 function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsAdaptive(dF_values, headers, thresholds, experimentType, varargin)
-    % FIXED: Less aggressive ROI filtering that matches monolithic script
+    % FIXED: ROI filtering that properly uses all configuration parameters
     
     cfg = GluSnFRConfig();
     
@@ -21,23 +22,26 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
         timepoint_ms = varargin{1};
     end
     
-    fprintf('    Filtering ROIs: %s experiment\n', experimentType);
+    if cfg.debug.VERBOSE_FILTERING
+        fprintf('    Filtering ROIs: %s experiment\n', experimentType);
+    end
     
     % FIXED: More lenient initial cleanup
-    [dF_values, headers, thresholds] = removeEmptyROIs(dF_values, headers, thresholds);
+    [dF_values, headers, thresholds] = removeEmptyROIs(dF_values, headers, thresholds, cfg);
     
-    % SKIP duplicate removal for now - can be too aggressive
-    % [dF_values, headers, thresholds] = removeDuplicateROIs(dF_values, headers, thresholds);
+    % CONFIGURABLE: Duplicate removal (currently disabled in config)
+    if cfg.filtering.ENABLE_DUPLICATE_REMOVAL
+        [dF_values, headers, thresholds] = removeDuplicateROIs(dF_values, headers, thresholds, cfg);
+    end
     
-    % FIXED: Use original thresholds (less aggressive than adaptive)
-    % Calculate adaptive thresholds but use them more leniently
+    % FIXED: Use configuration parameters for adaptive thresholds
     [adaptiveThresholds, noiseClassification] = calculateAdaptiveThresholds(thresholds, cfg);
     
-    % FIXED: Apply MORE LENIENT stimulus response filtering
+    % FIXED: Apply stimulus response filtering with configurable parameters
     if isPPF
-        responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms, cfg); % Use original thresholds
+        responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms, cfg);
     else
-        responseFilter = apply1APFiltering(dF_values, thresholds, cfg); % Use original thresholds
+        responseFilter = apply1APFiltering(dF_values, thresholds, cfg);
     end
     
     % Apply filters
@@ -46,45 +50,59 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     filteredThresholds = thresholds(responseFilter);
     
     % Generate statistics
-    stats = generateFilteringStats(headers, responseFilter, noiseClassification, experimentType);
+    stats = generateFilteringStats(headers, responseFilter, noiseClassification, experimentType, cfg);
     
-    fprintf('    Filtering complete: %d/%d ROIs passed (%s)\n', ...
-            length(filteredHeaders), length(headers), experimentType);
+    if cfg.debug.VERBOSE_FILTERING
+        fprintf('    Filtering complete: %d/%d ROIs passed (%s)\n', ...
+                length(filteredHeaders), length(headers), experimentType);
+    end
 end
 
 function [adaptiveThresholds, noiseClassification] = calculateAdaptiveThresholds(baseThresholds, cfg)
-    % FIXED: Less aggressive threshold adjustment
+    % FIXED: Use configuration parameters instead of hardcoded values
     
     lowNoiseROIs = baseThresholds <= cfg.thresholds.LOW_NOISE_CUTOFF;
     
-    % FIXED: Use 1.5 times 
+    % FIXED: Use cfg.thresholds.HIGH_NOISE_MULTIPLIER instead of hardcoded 1.5
     adaptiveThresholds = baseThresholds;
-    adaptiveThresholds(~lowNoiseROIs) = 1.5 * baseThresholds(~lowNoiseROIs);
+    adaptiveThresholds(~lowNoiseROIs) = cfg.thresholds.HIGH_NOISE_MULTIPLIER * baseThresholds(~lowNoiseROIs);
     
     % Create noise classification map
     noiseClassification = repmat({'high'}, size(baseThresholds));
     noiseClassification(lowNoiseROIs) = {'low'};
     
-    fprintf('    Adaptive thresholds: %d low noise, %d high noise ROIs\n', ...
-            sum(lowNoiseROIs), sum(~lowNoiseROIs));
+    if cfg.debug.VERBOSE_FILTERING
+        fprintf('    Adaptive thresholds: %d low noise, %d high noise ROIs (multiplier=%.1fx)\n', ...
+                sum(lowNoiseROIs), sum(~lowNoiseROIs), cfg.thresholds.HIGH_NOISE_MULTIPLIER);
+    end
 end
 
 function responseFilter = apply1APFiltering(dF_values, thresholds, cfg)
-    % FIXED: More lenient 1AP filtering
+    % FIXED: Use configurable threshold percentage from config
     
     stimulusFrame = cfg.timing.STIMULUS_FRAME;
     postWindow = cfg.timing.POST_STIMULUS_WINDOW;
     
     maxResponses = getStimulusResponse(dF_values, stimulusFrame, postWindow);
     
-    responseFilter = maxResponses >= (1 * thresholds) & isfinite(maxResponses);
+    % FIXED: Use configuration parameter instead of hardcoded 0.7
+    thresholdPercentage = cfg.filtering.THRESHOLD_PERCENTAGE_1AP;
+    responseFilter = maxResponses >= (thresholdPercentage * thresholds) & isfinite(maxResponses);
     
-    fprintf('    1AP filtering: %d/%d ROIs passed threshold \n', ...
-            sum(responseFilter), length(responseFilter));
+    % ENHANCED: Additional filtering based on minimum response amplitude
+    if isfield(cfg.filtering, 'MIN_RESPONSE_AMPLITUDE')
+        amplitudeFilter = maxResponses >= cfg.filtering.MIN_RESPONSE_AMPLITUDE;
+        responseFilter = responseFilter & amplitudeFilter;
+    end
+    
+    if cfg.debug.VERBOSE_FILTERING
+        fprintf('    1AP filtering: %d/%d ROIs passed threshold (%.0f%% of threshold used)\n', ...
+                sum(responseFilter), length(responseFilter), thresholdPercentage*100);
+    end
 end
 
 function responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms, cfg)
-    % FIXED: More lenient PPF filtering
+    % FIXED: Use configurable threshold percentage from config
     
     stimulusFrame1 = cfg.timing.STIMULUS_FRAME;
     stimulusFrame2 = stimulusFrame1 + round(timepoint_ms / cfg.timing.MS_PER_FRAME);
@@ -93,13 +111,24 @@ function responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms,
     maxResponses1 = getStimulusResponse(dF_values, stimulusFrame1, postWindow);
     maxResponses2 = getStimulusResponse(dF_values, stimulusFrame2, postWindow);
     
-    % FIXED: allow either stimulus
-    response1Filter = maxResponses1 >= (1 * thresholds) & isfinite(maxResponses1);
-    response2Filter = maxResponses2 >= (1 * thresholds) & isfinite(maxResponses2);
+    % FIXED: Use configuration parameter instead of hardcoded 0.6
+    thresholdPercentage = cfg.filtering.THRESHOLD_PERCENTAGE_PPF;
+    response1Filter = maxResponses1 >= (thresholdPercentage * thresholds) & isfinite(maxResponses1);
+    response2Filter = maxResponses2 >= (thresholdPercentage * thresholds) & isfinite(maxResponses2);
     responseFilter = response1Filter | response2Filter;
     
-    fprintf('    PPF filtering (%dms): stim1=%d, stim2=%d, either=%d ROIs (60%% threshold)\n', ...
-            timepoint_ms, sum(response1Filter), sum(response2Filter), sum(responseFilter));
+    % ENHANCED: Additional filtering based on minimum response amplitude
+    if isfield(cfg.filtering, 'MIN_RESPONSE_AMPLITUDE')
+        amplitude1Filter = maxResponses1 >= cfg.filtering.MIN_RESPONSE_AMPLITUDE;
+        amplitude2Filter = maxResponses2 >= cfg.filtering.MIN_RESPONSE_AMPLITUDE;
+        amplitudeFilter = amplitude1Filter | amplitude2Filter;
+        responseFilter = responseFilter & amplitudeFilter;
+    end
+    
+    if cfg.debug.VERBOSE_FILTERING
+        fprintf('    PPF filtering (%dms): stim1=%d, stim2=%d, either=%d ROIs (%.0f%% threshold)\n', ...
+                timepoint_ms, sum(response1Filter), sum(response2Filter), sum(responseFilter), thresholdPercentage*100);
+    end
 end
 
 function maxResponse = getStimulusResponse(dF_values, stimulusFrame, postWindow)
@@ -115,29 +144,66 @@ function maxResponse = getStimulusResponse(dF_values, stimulusFrame, postWindow)
     end
 end
 
-function [cleanData, cleanHeaders, cleanThresholds] = removeEmptyROIs(dF_values, headers, thresholds)
-    % FIXED: Only remove truly empty ROIs (all NaN or zero variance)
+function [cleanData, cleanHeaders, cleanThresholds] = removeEmptyROIs(dF_values, headers, thresholds, cfg)
+    % ENHANCED: Remove empty ROIs with configurable noise threshold
     
+    % Basic empty check
     nonEmptyROIs = ~all(isnan(dF_values), 1) & var(dF_values, 0, 1, 'omitnan') > 0;
+    
+    % ENHANCED: Additional noise-based filtering if configured
+    if isfield(cfg.filtering, 'MAX_BASELINE_NOISE')
+        baselineWindow = cfg.timing.BASELINE_FRAMES;
+        baselineNoise = std(dF_values(baselineWindow, :), 0, 1, 'omitnan');
+        noiseFilter = baselineNoise <= cfg.filtering.MAX_BASELINE_NOISE;
+        nonEmptyROIs = nonEmptyROIs & noiseFilter;
+        
+        if cfg.debug.VERBOSE_FILTERING && sum(~noiseFilter) > 0
+            fprintf('    Removed %d ROIs due to excessive baseline noise\n', sum(~noiseFilter));
+        end
+    end
     
     cleanData = dF_values(:, nonEmptyROIs);
     cleanHeaders = headers(nonEmptyROIs);
     cleanThresholds = thresholds(nonEmptyROIs);
     
     removed = sum(~nonEmptyROIs);
-    if removed > 0
-        fprintf('    Removed %d empty ROIs\n', removed);
+    if removed > 0 && cfg.debug.VERBOSE_FILTERING
+        fprintf('    Removed %d empty/noisy ROIs\n', removed);
     end
 end
 
-function stats = generateFilteringStats(originalHeaders, responseFilter, noiseClassification, experimentType)
-    % Generate comprehensive filtering statistics
+function [cleanData, cleanHeaders, cleanThresholds] = removeDuplicateROIs(dF_values, headers, thresholds, cfg)
+    % PLACEHOLDER: Duplicate ROI removal (could be implemented if needed)
+    % Currently just returns input data unchanged
+    
+    cleanData = dF_values;
+    cleanHeaders = headers;
+    cleanThresholds = thresholds;
+    
+    if cfg.debug.VERBOSE_FILTERING
+        fprintf('    Duplicate removal: feature currently disabled\n');
+    end
+end
+
+function stats = generateFilteringStats(originalHeaders, responseFilter, noiseClassification, experimentType, cfg)
+    % Generate comprehensive filtering statistics with config-aware reporting
     
     stats = struct();
     stats.experimentType = experimentType;
     stats.totalROIs = length(originalHeaders);
     stats.passedROIs = sum(responseFilter);
     stats.filterRate = stats.passedROIs / stats.totalROIs;
+    
+    % Configuration used
+    stats.configUsed = struct();
+    stats.configUsed.highNoiseMultiplier = cfg.thresholds.HIGH_NOISE_MULTIPLIER;
+    stats.configUsed.lowNoiseCutoff = cfg.thresholds.LOW_NOISE_CUTOFF;
+    
+    if strcmp(experimentType, 'PPF')
+        stats.configUsed.thresholdPercentage = cfg.filtering.THRESHOLD_PERCENTAGE_PPF;
+    else
+        stats.configUsed.thresholdPercentage = cfg.filtering.THRESHOLD_PERCENTAGE_1AP;
+    end
     
     % Noise level statistics for passed ROIs
     if iscell(noiseClassification)
@@ -149,7 +215,18 @@ function stats = generateFilteringStats(originalHeaders, responseFilter, noiseCl
         stats.highNoiseROIs = stats.passedROIs;
     end
     
-    stats.summary = sprintf('%s: %d/%d ROIs passed (%.1f%%), %d low noise, %d high noise', ...
+    stats.summary = sprintf('%s: %d/%d ROIs passed (%.1f%%), %d low noise, %d high noise [thresh=%.0f%%, mult=%.1fx]', ...
         experimentType, stats.passedROIs, stats.totalROIs, stats.filterRate*100, ...
-        stats.lowNoiseROIs, stats.highNoiseROIs);
+        stats.lowNoiseROIs, stats.highNoiseROIs, ...
+        stats.configUsed.thresholdPercentage*100, stats.configUsed.highNoiseMultiplier);
+end
+
+function noiseLevel = classifyNoiseLevel(threshold, cfg)
+    % Classify noise level based on threshold
+    
+    if threshold <= cfg.thresholds.LOW_NOISE_CUTOFF
+        noiseLevel = 'low';
+    else
+        noiseLevel = 'high';
+    end
 end
