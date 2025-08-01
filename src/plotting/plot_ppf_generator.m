@@ -224,7 +224,7 @@ function csROIs = findCoverslipROIs(dataVarNames, csCell)
 end
 
 function success = generateCoverslipIndividualPlots(plotData, csROIs, csCell, genotype, roiInfo, plotsFolder, cfg, utils)
-    % Generate individual plots for one coverslip
+    % OPTIMIZED: Generate individual plots for one coverslip with pre-calculated layouts
     
     success = false;
     
@@ -236,21 +236,36 @@ function success = generateCoverslipIndividualPlots(plotData, csROIs, csCell, ge
         maxPlotsPerFigure = cfg.plotting.MAX_PLOTS_PER_FIGURE;
         numFigures = ceil(length(csROIs) / maxPlotsPerFigure);
         
+        % PRE-CALCULATE: All figure layouts
+        figureLayouts = cell(numFigures, 1);
         for figNum = 1:numFigures
-            fig = utils.createStandardFigure('standard');
-            
             startROI = (figNum - 1) * maxPlotsPerFigure + 1;
             endROI = min(figNum * maxPlotsPerFigure, length(csROIs));
+            numPlotsThisFig = endROI - startROI + 1;
+            [nRows, nCols] = utils.calculateOptimalLayout(numPlotsThisFig);
             
-            [nRows, nCols] = utils.calculateOptimalLayout(endROI - startROI + 1);
+            figureLayouts{figNum} = struct(...
+                'startROI', startROI, ...
+                'endROI', endROI, ...
+                'numPlots', numPlotsThisFig, ...
+                'nRows', nRows, ...
+                'nCols', nCols);
+        end
+        
+        for figNum = 1:numFigures
+            layout = figureLayouts{figNum};
+            
+            % CONSISTENT: Use standard figure type
+            fig = utils.createStandardFigure('standard');
+            
             hasData = false;
             
-            for roiIdx = startROI:endROI
-                subplotIdx = roiIdx - startROI + 1;
+            for roiIdx = layout.startROI:layout.endROI
+                subplotIdx = roiIdx - layout.startROI + 1;
                 varName = csROIs{roiIdx};
                 traceData = plotData.(varName);
                 
-                subplot(nRows, nCols, subplotIdx);
+                subplot(layout.nRows, layout.nCols, subplotIdx);
                 hold on;
                 
                 if ~all(isnan(traceData))
@@ -265,10 +280,10 @@ function success = generateCoverslipIndividualPlots(plotData, csROIs, csCell, ge
                     
                     plot(timeData_ms, traceData, 'Color', traceColor, 'LineWidth', 1.0);
                     
-                    % Add threshold
+                    % Add threshold and CONSISTENT stimulus markers
                     threshold = getPPFROIThreshold(varName, roiInfo);
                     utils.addStandardElements(timeData_ms, stimulusTime_ms1, threshold, cfg, ...
-                                            'PPFTimepoint', roiInfo.timepoint);
+                                            'PPFTimepoint', roiInfo.timepoint, 'StimulusStyle', 'line');
                 end
                 
                 % Title
@@ -308,7 +323,7 @@ function success = generateCoverslipIndividualPlots(plotData, csROIs, csCell, ge
 end
 
 function success = generatePPFAveragedPlots(averagedData, roiInfo, groupKey, plotsFolder, plotType)
-    % Generate PPF averaged plots
+    % OPTIMIZED: Generate PPF averaged plots with pre-calculated layouts
     
     success = false;
     
@@ -338,19 +353,34 @@ function success = generatePPFAveragedPlots(averagedData, roiInfo, groupKey, plo
         maxPlotsPerFigure = cfg.plotting.MAX_PLOTS_PER_FIGURE;
         numFigures = ceil(numAvgPlots / maxPlotsPerFigure);
         
+        % PRE-CALCULATE: All figure layouts
+        figureLayouts = cell(numFigures, 1);
         for figNum = 1:numFigures
-            fig = utils.createStandardFigure('standard');
-            
             startPlot = (figNum - 1) * maxPlotsPerFigure + 1;
             endPlot = min(figNum * maxPlotsPerFigure, numAvgPlots);
+            numPlotsThisFig = endPlot - startPlot + 1;
+            [nRows, nCols] = utils.calculateOptimalLayout(numPlotsThisFig);
             
-            [nRows, nCols] = utils.calculateOptimalLayout(endPlot - startPlot + 1);
+            figureLayouts{figNum} = struct(...
+                'startPlot', startPlot, ...
+                'endPlot', endPlot, ...
+                'numPlots', numPlotsThisFig, ...
+                'nRows', nRows, ...
+                'nCols', nCols);
+        end
+        
+        for figNum = 1:numFigures
+            layout = figureLayouts{figNum};
+            
+            % CONSISTENT: Use standard figure type
+            fig = utils.createStandardFigure('standard');
+            
             hasData = false;
             
-            for plotIdx = startPlot:endPlot
-                subplotIdx = plotIdx - startPlot + 1;
+            for plotIdx = layout.startPlot:layout.endPlot
+                subplotIdx = plotIdx - layout.startPlot + 1;
                 
-                subplot(nRows, nCols, subplotIdx);
+                subplot(layout.nRows, layout.nCols, subplotIdx);
                 hold on;
                 
                 varName = avgVarNames{plotIdx};
@@ -361,10 +391,10 @@ function success = generatePPFAveragedPlots(averagedData, roiInfo, groupKey, plo
                     
                     plot(timeData_ms, avgData, 'Color', traceColor, 'LineWidth', 2.0);
                     
-                    % Add threshold and stimuli
+                    % Add threshold and CONSISTENT stimuli
                     avgThreshold = calculatePPFAverageThreshold(avgData, cfg);
                     utils.addStandardElements(timeData_ms, stimulusTime_ms1, avgThreshold, cfg, ...
-                                            'PPFTimepoint', roiInfo.timepoint);
+                                            'PPFTimepoint', roiInfo.timepoint, 'StimulusStyle', 'line');
                 end
                 
                 % Title with genotype and plot type

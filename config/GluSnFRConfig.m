@@ -74,12 +74,15 @@ function config = GluSnFRConfig()
     config.io.CACHE_PARSED_FILES = false;        % Disable caching to save memory
     config.io.VALIDATE_FILES_PARALLEL = true;    % Validate files in parallel
     
-    %% OPTIMIZED: Plotting Parameters
+    %% OPTIMIZED: Plotting Parameters (add this to the plotting section in GluSnFRConfig.m)
     config.plotting = struct();
     config.plotting.MAX_PLOTS_PER_FIGURE = 12;
     config.plotting.DPI = 300;
     config.plotting.Y_LIMITS = [-0.02, 0.08];
     config.plotting.TRANSPARENCY = 0.7;
+    
+    % NEW: Stimulus marker configuration
+    config.plotting.STIMULUS_MARKER_STYLE = 'line';  % 'line' or 'pentagram'
     
     % NEW: Performance optimizations for plotting
     config.plotting.USE_PARALLEL_PLOTTING = true;
@@ -93,7 +96,7 @@ function config = GluSnFRConfig()
     config.plotting.CLOSE_FIGURES_IMMEDIATELY = true;
     config.plotting.OPTIMIZE_LINE_OBJECTS = true; % Combine line segments
     config.plotting.REDUCE_PLOT_RESOLUTION = false; % Keep full resolution
-    
+        
     %% Colors (unchanged)
     config.colors = struct();
     config.colors.STIMULUS = [0, 0.8, 0];

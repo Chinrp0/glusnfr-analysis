@@ -116,12 +116,10 @@ function success = executePlotTask(task)
 end
 
 function success = generateTrialsPlot(organizedData, roiInfo, groupKey, outputFolder)
-    % DEBUG VERSION - Generate individual trials plots with detailed logging
+    % OPTIMIZED: Pre-calculate all subplot requirements to avoid iterative resizing
     
     success = false;
-    
-    % DEBUG: Enable debug logging (set to false to disable all debug output)
-    DEBUG_MODE = false;
+    DEBUG_MODE = false; % Set to true for debugging
     
     if DEBUG_MODE, fprintf('  [DEBUG] Starting generateTrialsPlot for %s\n', groupKey); end
     
@@ -140,14 +138,30 @@ function success = generateTrialsPlot(organizedData, roiInfo, groupKey, outputFo
             return;
         end
         
-        % Use original maxPlotsPerFigure to avoid layout issues
-        maxPlotsPerFigure = cfg.plotting.MAX_PLOTS_PER_FIGURE;  % Use config value
+        % PRE-CALCULATE: All subplot requirements upfront
+        maxPlotsPerFigure = cfg.plotting.MAX_PLOTS_PER_FIGURE;
         numROIs = length(roiInfo.roiNumbers);
         numFigures = ceil(numROIs / maxPlotsPerFigure);
         
-        if DEBUG_MODE, fprintf('  [DEBUG] Will create %d figures for %d ROIs\n', numFigures, numROIs); end
+        % PRE-CALCULATE: Layout for each figure
+        figureLayouts = cell(numFigures, 1);
+        for figNum = 1:numFigures
+            startIdx = (figNum - 1) * maxPlotsPerFigure + 1;
+            endIdx = min(figNum * maxPlotsPerFigure, numROIs);
+            numPlotsThisFig = endIdx - startIdx + 1;
+            [nRows, nCols] = utils.calculateOptimalLayout(numPlotsThisFig);
+            
+            figureLayouts{figNum} = struct(...
+                'startIdx', startIdx, ...
+                'endIdx', endIdx, ...
+                'numPlots', numPlotsThisFig, ...
+                'nRows', nRows, ...
+                'nCols', nCols);
+        end
         
-        % Get color scheme and unique trials
+        if DEBUG_MODE, fprintf('  [DEBUG] Pre-calculated %d figures with layouts\n', numFigures); end
+        
+        % Get color scheme and unique trials (calculated once)
         trialColors = utils.createColorScheme(10, 'trials');
         uniqueTrials = unique(roiInfo.originalTrialNumbers);
         uniqueTrials = uniqueTrials(isfinite(uniqueTrials));
@@ -160,39 +174,26 @@ function success = generateTrialsPlot(organizedData, roiInfo, groupKey, outputFo
             return;
         end
         
-        % Setup plotting (check if functions exist)
-        try
-            if isfield(utils, 'setupFastPlotting')
-                utils.setupFastPlotting();
-                if DEBUG_MODE, fprintf('  [DEBUG] Fast plotting setup successful\n'); end
-            else
-                if DEBUG_MODE, fprintf('  [DEBUG] setupFastPlotting not available, using defaults\n'); end
-            end
-        catch ME
-            if DEBUG_MODE, fprintf('  [DEBUG] setupFastPlotting failed: %s\n', ME.message); end
-        end
-        
+        % OPTIMIZED: Process all figures with pre-calculated layouts
         for figNum = 1:numFigures
+            layout = figureLayouts{figNum};
+            
             if DEBUG_MODE, fprintf('  [DEBUG] Creating figure %d/%d\n', figNum, numFigures); end
             
-            % Use standard figure creation to avoid issues
-            fig = figure('Position', [50, 100, 1900, 1000], 'Visible', 'off', 'Color', 'white');
+            % CONSISTENT: Use standard figure for all plots
+            fig = utils.createStandardFigure('standard');
             
-            startIdx = (figNum - 1) * maxPlotsPerFigure + 1;
-            endIdx = min(figNum * maxPlotsPerFigure, numROIs);
-            numPlotsThisFig = endIdx - startIdx + 1;
-            
-            [nRows, nCols] = utils.calculateOptimalLayout(numPlotsThisFig);
-            if DEBUG_MODE, fprintf('  [DEBUG] Layout: %dx%d for %d plots\n', nRows, nCols, numPlotsThisFig); end
+            if DEBUG_MODE, fprintf('  [DEBUG] Layout: %dx%d for %d plots\n', layout.nRows, layout.nCols, layout.numPlots); end
             
             hasData = false;
             plotsWithData = 0;
             
-            for roiArrayIdx = startIdx:endIdx
-                subplotIdx = roiArrayIdx - startIdx + 1;
+            % OPTIMIZED: Process subplots with pre-calculated indices
+            for roiArrayIdx = layout.startIdx:layout.endIdx
+                subplotIdx = roiArrayIdx - layout.startIdx + 1;
                 originalROI = roiInfo.roiNumbers(roiArrayIdx);
                 
-                subplot(nRows, nCols, subplotIdx);
+                subplot(layout.nRows, layout.nCols, subplotIdx);
                 hold on;
                 
                 % Plot trials for this ROI
@@ -210,7 +211,7 @@ function success = generateTrialsPlot(organizedData, roiInfo, groupKey, outputFo
                             
                             colorIdx = mod(i-1, size(trialColors, 1)) + 1;
                             
-                            % Standard plotting (not optimized version)
+                            % Standard plotting
                             h_line = plot(timeData_ms, trialData, 'Color', trialColors(colorIdx, :), 'LineWidth', 1.0);
                             h_line.Color(4) = cfg.plotting.TRANSPARENCY;
                             
@@ -232,9 +233,9 @@ function success = generateTrialsPlot(organizedData, roiInfo, groupKey, outputFo
                     plotsWithData = plotsWithData + 1;
                 end
                 
-                % Standard formatting
+                % CONSISTENT: Use standardized stimulus marker (green line)
                 ylim(cfg.plotting.Y_LIMITS);
-                plot([stimulusTime_ms, stimulusTime_ms], cfg.plotting.Y_LIMITS, ':g', 'LineWidth', 1.0);
+                plot([stimulusTime_ms, stimulusTime_ms], cfg.plotting.Y_LIMITS, '-', 'Color', cfg.colors.STIMULUS, 'LineWidth', 1.0);
                 
                 title(sprintf('ROI %d (n=%d)', originalROI, trialCount), 'FontSize', 10, 'FontWeight', 'bold');
                 xlabel('Time (ms)', 'FontSize', 8);
@@ -244,7 +245,7 @@ function success = generateTrialsPlot(organizedData, roiInfo, groupKey, outputFo
                 hold off;
             end
             
-            if DEBUG_MODE, fprintf('  [DEBUG] Figure %d: %d/%d plots have data\n', figNum, plotsWithData, numPlotsThisFig); end
+            if DEBUG_MODE, fprintf('  [DEBUG] Figure %d: %d/%d plots have data\n', figNum, plotsWithData, layout.numPlots); end
             
             % Save if we have data
             if hasData
@@ -258,27 +259,18 @@ function success = generateTrialsPlot(organizedData, roiInfo, groupKey, outputFo
                 
                 sgtitle(titleText, 'FontSize', 12, 'Interpreter', 'none', 'FontWeight', 'bold');
                 
-                % Check output folder
                 fullPlotPath = fullfile(outputFolder, plotFile);
                 if DEBUG_MODE, fprintf('  [DEBUG] Saving to: %s\n', fullPlotPath); end
                 
-                % Check if output folder exists
                 if ~exist(outputFolder, 'dir')
                     if DEBUG_MODE, fprintf('  [DEBUG] Creating output folder: %s\n', outputFolder); end
                     mkdir(outputFolder);
                 end
                 
-                % Try saving
                 try
-                    if isfield(utils, 'savePlotFast')
-                        utils.savePlotFast(fig, fullPlotPath, 150);
-                        if DEBUG_MODE, fprintf('  [DEBUG] Saved using savePlotFast\n'); end
-                    else
-                        print(fig, fullPlotPath, '-dpng', sprintf('-r%d', cfg.plotting.DPI));
-                        if DEBUG_MODE, fprintf('  [DEBUG] Saved using standard print\n'); end
-                    end
+                    print(fig, fullPlotPath, '-dpng', sprintf('-r%d', cfg.plotting.DPI));
+                    if DEBUG_MODE, fprintf('  [DEBUG] Saved using standard print\n'); end
                     
-                    % Verify file was created
                     if exist(fullPlotPath, 'file')
                         if DEBUG_MODE, fprintf('  [DEBUG] File confirmed: %s\n', plotFile); end
                         success = true;
@@ -296,28 +288,16 @@ function success = generateTrialsPlot(organizedData, roiInfo, groupKey, outputFo
             close(fig);
         end
         
-        % Cleanup
-        try
-            if isfield(utils, 'cleanupFastPlotting')
-                utils.cleanupFastPlotting();
-            end
-        catch
-            % Silent cleanup failure
-        end
-        
         if DEBUG_MODE, fprintf('  [DEBUG] generateTrialsPlot complete. Success: %s\n', mat2str(success)); end
         
     catch ME
         if DEBUG_MODE, fprintf('  [DEBUG] EXCEPTION in generateTrialsPlot: %s\n', ME.message); end
-        if DEBUG_MODE && ~isempty(ME.stack)
-            fprintf('  [DEBUG] Stack: %s (line %d)\n', ME.stack(1).name, ME.stack(1).line);
-        end
         success = false;
     end
 end
 
 function success = generateAveragedPlot(averagedData, roiInfo, groupKey, outputFolder)
-    % Generate averaged ROI plots
+    % OPTIMIZED: Generate averaged ROI plots with consistent styling
     
     success = false;
     
@@ -338,23 +318,36 @@ function success = generateAveragedPlot(averagedData, roiInfo, groupKey, outputF
         maxPlotsPerFigure = cfg.plotting.MAX_PLOTS_PER_FIGURE;
         numFigures = ceil(numAvgPlots / maxPlotsPerFigure);
         
+        % PRE-CALCULATE: All figure layouts
+        figureLayouts = cell(numFigures, 1);
         for figNum = 1:numFigures
-            fig = utils.createStandardFigure('standard');
-            
             startPlot = (figNum - 1) * maxPlotsPerFigure + 1;
             endPlot = min(figNum * maxPlotsPerFigure, numAvgPlots);
             numPlotsThisFig = endPlot - startPlot + 1;
-            
             [nRows, nCols] = utils.calculateOptimalLayout(numPlotsThisFig);
+            
+            figureLayouts{figNum} = struct(...
+                'startPlot', startPlot, ...
+                'endPlot', endPlot, ...
+                'numPlots', numPlotsThisFig, ...
+                'nRows', nRows, ...
+                'nCols', nCols);
+        end
+        
+        for figNum = 1:numFigures
+            layout = figureLayouts{figNum};
+            
+            % CONSISTENT: Use standard figure type
+            fig = utils.createStandardFigure('standard');
             
             legendHandles = [];
             legendLabels = {};
             hasData = false;
             
-            for plotIdx = startPlot:endPlot
-                subplotIdx = plotIdx - startPlot + 1;
+            for plotIdx = layout.startPlot:layout.endPlot
+                subplotIdx = plotIdx - layout.startPlot + 1;
                 
-                subplot(nRows, nCols, subplotIdx);
+                subplot(layout.nRows, layout.nCols, subplotIdx);
                 hold on;
                 
                 varName = avgVarNames{plotIdx};
@@ -373,12 +366,14 @@ function success = generateAveragedPlot(averagedData, roiInfo, groupKey, outputF
                     
                     % Add threshold
                     avgThreshold = calculateAverageThreshold(avgData, cfg);
-                    utils.addStandardElements(timeData_ms, stimulusTime_ms, avgThreshold, cfg);
+                    
+                    % CONSISTENT: Use standardized elements with line stimulus
+                    utils.addStandardElements(timeData_ms, stimulusTime_ms, avgThreshold, cfg, 'StimulusStyle', 'line');
                     
                     if subplotIdx == 1 && isfinite(avgThreshold)
                         legendHandles(end+1) = plot(NaN, NaN, 'g--', 'LineWidth', 1.5);
                         legendLabels{end+1} = 'Threshold';
-                        legendHandles(end+1) = plot(NaN, NaN, ':pentagram', 'Color', [0, 0.8, 0]);
+                        legendHandles(end+1) = plot(NaN, NaN, '-', 'Color', cfg.colors.STIMULUS);
                         legendLabels{end+1} = 'Stimulus';
                     end
                 end
@@ -423,7 +418,7 @@ function success = generateAveragedPlot(averagedData, roiInfo, groupKey, outputF
 end
 
 function success = generateCoverslipPlot(totalAveragedData, roiInfo, groupKey, outputFolder)
-    % Generate coverslip average plots by noise level
+    % OPTIMIZED: Generate coverslip average plots with consistent styling
     
     success = false;
     
@@ -441,7 +436,8 @@ function success = generateCoverslipPlot(totalAveragedData, roiInfo, groupKey, o
         stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS;
         varNames = totalAveragedData.Properties.VariableNames(2:end);
         
-        fig = utils.createStandardFigure('wide');
+        % CONSISTENT: Use standard figure type
+        fig = utils.createStandardFigure('standard');
         hold on;
         
         legendHandles = [];
@@ -492,13 +488,19 @@ function success = generateCoverslipPlot(totalAveragedData, roiInfo, groupKey, o
         
         % Save if we have data
         if hasData
-            utils.addStandardElements(timeData_ms, stimulusTime_ms, NaN, cfg, 'ShowThreshold', false);
+            % CONSISTENT: Use line stimulus marker
+            ylim(cfg.plotting.Y_LIMITS);
+            plot([stimulusTime_ms, stimulusTime_ms], cfg.plotting.Y_LIMITS, '-', 'Color', cfg.colors.STIMULUS, 'LineWidth', 1.0);
             
             % Add stimulus to legend
-            hStim = plot([stimulusTime_ms, stimulusTime_ms], [cfg.plotting.Y_LIMITS(1), cfg.plotting.Y_LIMITS(1)], ...
-                         ':pentagram', 'Color', [0, 0.8, 0], 'LineWidth', 1.0);
+            hStim = plot(NaN, NaN, '-', 'Color', cfg.colors.STIMULUS, 'LineWidth', 1.0);
             legendHandles(end+1) = hStim;
             legendLabels{end+1} = 'Stimulus';
+            
+            % Formatting
+            xlabel('Time (ms)', 'FontSize', 10);
+            ylabel('ΔF/F', 'FontSize', 10);
+            grid on; box on;
             
             title(sprintf('%s - Coverslip Averages by Noise Level', cleanGroupKey), ...
                   'FontSize', 14, 'FontWeight', 'bold', 'Interpreter', 'none');

@@ -88,15 +88,16 @@ function fig = createStandardFigure(figureType, titleText)
 end
 
 function addStandardElements(timeData_ms, stimulusTime_ms, threshold, cfg, varargin)
-    % Add standard plot elements (stimulus, threshold, formatting)
+    % UPDATED: Add standard plot elements with configurable stimulus markers
     
     % Parse optional inputs
     p = inputParser;
     addParameter(p, 'ShowThreshold', true, @islogical);
     addParameter(p, 'ShowStimulus', true, @islogical);
-    addParameter(p, 'StimulusColor', [0, 0.8, 0], @isnumeric);
-    addParameter(p, 'ThresholdColor', [0, 0.8, 0], @isnumeric);
+    addParameter(p, 'StimulusColor', cfg.colors.STIMULUS, @isnumeric);
+    addParameter(p, 'ThresholdColor', cfg.colors.THRESHOLD, @isnumeric);
     addParameter(p, 'PPFTimepoint', [], @isnumeric);
+    addParameter(p, 'StimulusStyle', 'line', @ischar); % 'line' or 'pentagram'
     parse(p, varargin{:});
     
     config = getFigureConfig();
@@ -104,19 +105,50 @@ function addStandardElements(timeData_ms, stimulusTime_ms, threshold, cfg, varar
     % Set y-limits first
     ylim(cfg.plotting.Y_LIMITS);
     
-    % Add stimulus marker(s)
+    % Add stimulus marker(s) with configurable style
     if p.Results.ShowStimulus
-        stimY = cfg.plotting.Y_LIMITS(1);
-        plot([stimulusTime_ms, stimulusTime_ms], [stimY, stimY], ...
-             ':pentagram', 'Color', p.Results.StimulusColor, ...
-             'LineWidth', config.lines.stimulus, 'HandleVisibility', 'off');
+        stimulusStyle = p.Results.StimulusStyle;
         
-        % Add second stimulus for PPF
-        if ~isempty(p.Results.PPFTimepoint)
-            stimulusTime_ms2 = stimulusTime_ms + p.Results.PPFTimepoint;
-            plot([stimulusTime_ms2, stimulusTime_ms2], [stimY, stimY], ...
-                 ':pentagram', 'Color', 'c', ...
-                 'LineWidth', config.lines.stimulus, 'HandleVisibility', 'off');
+        % Get stimulus marker style from config if available
+        if isfield(cfg.plotting, 'STIMULUS_MARKER_STYLE')
+            stimulusStyle = cfg.plotting.STIMULUS_MARKER_STYLE;
+        end
+        
+        switch lower(stimulusStyle)
+            case 'line'
+                % Green vertical line (consistent across all plots)
+                plot([stimulusTime_ms, stimulusTime_ms], cfg.plotting.Y_LIMITS, ...
+                     '-', 'Color', p.Results.StimulusColor, ...
+                     'LineWidth', config.lines.stimulus, 'HandleVisibility', 'off');
+                
+                % Add second stimulus for PPF
+                if ~isempty(p.Results.PPFTimepoint)
+                    stimulusTime_ms2 = stimulusTime_ms + p.Results.PPFTimepoint;
+                    plot([stimulusTime_ms2, stimulusTime_ms2], cfg.plotting.Y_LIMITS, ...
+                         '-', 'Color', 'c', ...
+                         'LineWidth', config.lines.stimulus, 'HandleVisibility', 'off');
+                end
+                
+            case 'pentagram'
+                % Pentagram markers at bottom of plot
+                stimY = cfg.plotting.Y_LIMITS(1);
+                plot([stimulusTime_ms, stimulusTime_ms], [stimY, stimY], ...
+                     ':pentagram', 'Color', p.Results.StimulusColor, ...
+                     'LineWidth', config.lines.stimulus, 'HandleVisibility', 'off');
+                
+                % Add second stimulus for PPF
+                if ~isempty(p.Results.PPFTimepoint)
+                    stimulusTime_ms2 = stimulusTime_ms + p.Results.PPFTimepoint;
+                    plot([stimulusTime_ms2, stimulusTime_ms2], [stimY, stimY], ...
+                         ':pentagram', 'Color', 'c', ...
+                         'LineWidth', config.lines.stimulus, 'HandleVisibility', 'off');
+                end
+                
+            otherwise
+                % Default to line
+                plot([stimulusTime_ms, stimulusTime_ms], cfg.plotting.Y_LIMITS, ...
+                     '-', 'Color', p.Results.StimulusColor, ...
+                     'LineWidth', config.lines.stimulus, 'HandleVisibility', 'off');
         end
     end
     
