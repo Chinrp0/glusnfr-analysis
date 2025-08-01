@@ -204,9 +204,10 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     
     % Apply stimulus response filtering with configurable parameters
     if isPPF
-        responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms, cfg);
+        [responseFilter, peakResponses] = applyPPFFiltering(dF_values, thresholds, timepoint_ms, cfg);
     else
         responseFilter = apply1APFiltering(dF_values, thresholds, cfg);
+        peakResponses = []; % Not applicable for 1AP
     end
     
     % Apply filters
@@ -216,6 +217,14 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     
     % Generate statistics
     stats = generateFilteringStats(headers, responseFilter, noiseClassification, experimentType, cfg);
+    
+    % Add PPF-specific peak response information to stats
+    if isPPF && ~isempty(peakResponses)
+        stats.peakResponses = peakResponses;
+        stats.peakResponses.filteredBothPeaks = peakResponses.bothPeaks(responseFilter);
+        stats.peakResponses.filteredPeak1Only = peakResponses.peak1Only(responseFilter);
+        stats.peakResponses.filteredPeak2Only = peakResponses.peak2Only(responseFilter);
+    end
     
     if cfg.debug.VERBOSE_FILTERING
         fprintf('    Original filtering complete: %d/%d ROIs passed (%s)\n', ...
@@ -262,8 +271,9 @@ function responseFilter = apply1APFiltering(dF_values, thresholds, cfg)
     end
 end
 
-function responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms, cfg)
+function [responseFilter, peakResponses] = applyPPFFiltering(dF_values, thresholds, timepoint_ms, cfg)
     % Use configurable threshold percentage from config
+    % Now also returns peak response information
     
     stimulusFrame1 = cfg.timing.STIMULUS_FRAME;
     stimulusFrame2 = stimulusFrame1 + round(timepoint_ms / cfg.timing.MS_PER_FRAME);
@@ -284,9 +294,22 @@ function responseFilter = applyPPFFiltering(dF_values, thresholds, timepoint_ms,
         responseFilter = responseFilter & amplitudeFilter;
     end
     
+    % NEW: Track peak response patterns
+    peakResponses = struct();
+    peakResponses.response1Filter = response1Filter;
+    peakResponses.response2Filter = response2Filter;
+    peakResponses.maxResponses1 = maxResponses1;
+    peakResponses.maxResponses2 = maxResponses2;
+    
+    % Classify response patterns
+    peakResponses.bothPeaks = response1Filter & response2Filter;
+    peakResponses.peak1Only = response1Filter & ~response2Filter;
+    peakResponses.peak2Only = ~response1Filter & response2Filter;
+    
     if cfg.debug.VERBOSE_FILTERING
-        fprintf('    PPF filtering (%dms): stim1=%d, stim2=%d, either=%d ROIs (%.0f%% threshold)\n', ...
-                timepoint_ms, sum(response1Filter), sum(response2Filter), sum(responseFilter), thresholdPercentage*100);
+        fprintf('    PPF filtering (%dms): both=%d, peak1=%d, peak2=%d, either=%d ROIs (%.0f%% threshold)\n', ...
+                timepoint_ms, sum(peakResponses.bothPeaks), sum(peakResponses.peak1Only), ...
+                sum(peakResponses.peak2Only), sum(responseFilter), thresholdPercentage*100);
     end
 end
 

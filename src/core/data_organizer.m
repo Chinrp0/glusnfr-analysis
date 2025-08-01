@@ -82,8 +82,9 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData(groupData, g
     end
 end
 
+
 function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData, groupMetadata, groupKey, cfg)
-    % PPF-specific data organization
+    % PPF-specific data organization with peak response separation and robust fallback
     
     % Extract timepoint from group key
     timepointMatch = regexp(groupKey, 'PPF_(\d+)ms', 'tokens');
@@ -96,7 +97,8 @@ function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData
     % Process coverslip files
     maxFiles = length(groupData);
     coverslipFiles = repmat(struct('coverslipCell', '', 'roiNumbers', [], ...
-                                  'dF_values', [], 'thresholds', [], 'timeData_ms', []), maxFiles, 1);
+                                  'dF_values', [], 'thresholds', [], 'timeData_ms', [], ...
+                                  'peakResponses', []), maxFiles, 1);
     fileCount = 0;
     
     utils = string_utils(cfg);
@@ -120,6 +122,22 @@ function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData
             coverslipFiles(fileCount).dF_values = groupData{i}.dF_values;
             coverslipFiles(fileCount).thresholds = groupData{i}.thresholds;
             coverslipFiles(fileCount).timeData_ms = groupData{i}.timeData_ms;
+            
+            % Store peak response information if available (NEW - with fallback)
+            if isfield(groupData{i}, 'filterStats') && ...
+               isfield(groupData{i}.filterStats, 'peakResponses') && ...
+               ~isempty(groupData{i}.filterStats.peakResponses)
+                coverslipFiles(fileCount).peakResponses = groupData{i}.filterStats.peakResponses;
+            else
+                % Fallback: create default peak response classification
+                numROIs = length(roiNums);
+                coverslipFiles(fileCount).peakResponses = struct();
+                coverslipFiles(fileCount).peakResponses.filteredBothPeaks = false(numROIs, 1);
+                coverslipFiles(fileCount).peakResponses.filteredPeak1Only = false(numROIs, 1);
+                coverslipFiles(fileCount).peakResponses.filteredPeak2Only = false(numROIs, 1);
+                % Default: assume all ROIs are "single peak" if no classification available
+                coverslipFiles(fileCount).peakResponses.filteredPeak1Only(1:numROIs) = true;
+            end
         end
     end
     
@@ -130,12 +148,21 @@ function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData
         error('No valid PPF data found');
     end
     
-    % Create organized table
+    % Create organized data - start with original approach as baseline
     timeData_ms = coverslipFiles(1).timeData_ms;
-    organizedTable = table();
-    organizedTable.Frame = timeData_ms;
     
-    % Add all ROIs from all coverslip files
+    % Create all data table first (this is the baseline that should always work)
+    allDataTable = table();
+    allDataTable.Frame = timeData_ms;
+    
+    % Create separation tables
+    bothPeaksTable = table();
+    bothPeaksTable.Frame = timeData_ms;
+    
+    singlePeakTable = table();
+    singlePeakTable.Frame = timeData_ms;
+    
+    % Add all ROIs to tables with peak response classification
     for fileIdx = 1:length(coverslipFiles)
         fileData = coverslipFiles(fileIdx);
         csCell = fileData.coverslipCell;
@@ -147,28 +174,107 @@ function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData
             originalIdx = sortOrder(roiIdx);
             
             colName = sprintf('%s_ROI%d', csCell, roiNum);
-            organizedTable.(colName) = fileData.dF_values(:, originalIdx);
+            
+            % Make sure we have valid data for this ROI
+            if originalIdx <= size(fileData.dF_values, 2)
+                roiData = fileData.dF_values(:, originalIdx);
+                
+                % Always add to all data table
+                allDataTable.(colName) = roiData;
+                
+                % Classify and add to appropriate separation table
+                if ~isempty(fileData.peakResponses)
+                    % Check bounds before accessing arrays
+                    isBothPeaks = originalIdx <= length(fileData.peakResponses.filteredBothPeaks) && ...
+                                  fileData.peakResponses.filteredBothPeaks(originalIdx);
+                    isPeak1Only = originalIdx <= length(fileData.peakResponses.filteredPeak1Only) && ...
+                                  fileData.peakResponses.filteredPeak1Only(originalIdx);
+                    isPeak2Only = originalIdx <= length(fileData.peakResponses.filteredPeak2Only) && ...
+                                  fileData.peakResponses.filteredPeak2Only(originalIdx);
+                    
+                    if isBothPeaks
+                        bothPeaksTable.(colName) = roiData;
+                    elseif isPeak1Only || isPeak2Only
+                        singlePeakTable.(colName) = roiData;
+                    else
+                        % Default: add to single peak if not classified as both
+                        singlePeakTable.(colName) = roiData;
+                    end
+                else
+                    % Fallback: if no peak info, add to single peak table
+                    singlePeakTable.(colName) = roiData;
+                end
+            end
         end
     end
     
-    organizedData = organizedTable;
+    % Package organized data (ensure allData is always available)
+    organizedData = struct();
+    organizedData.allData = allDataTable;
     
-    % Create averaged data
+    % Only add separated tables if they have data beyond Frame column
+    if width(bothPeaksTable) > 1
+        organizedData.bothPeaks = bothPeaksTable;
+    end
+    
+    if width(singlePeakTable) > 1
+        organizedData.singlePeak = singlePeakTable;
+    end
+    
+    % Create averaged data for each available category
+    averagedData = struct();
+    averagedData.allData = createPPFAveragedData(allDataTable, coverslipFiles);
+    
+    if isfield(organizedData, 'bothPeaks')
+        averagedData.bothPeaks = createPPFAveragedData(bothPeaksTable, coverslipFiles);
+    end
+    
+    if isfield(organizedData, 'singlePeak')
+        averagedData.singlePeak = createPPFAveragedData(singlePeakTable, coverslipFiles);
+    end
+    
+    % Create ROI info
+    roiInfo = struct();
+    roiInfo.coverslipFiles = coverslipFiles;
+    roiInfo.timepoint = timepoint;
+    roiInfo.experimentType = 'PPF';
+    roiInfo.dataType = 'separated';
+    
+    fprintf('    PPF organization complete: %d total ROIs, %d both peaks, %d single peak\n', ...
+            width(allDataTable)-1, ...
+            ternary(isfield(organizedData, 'bothPeaks'), width(organizedData.bothPeaks)-1, 0), ...
+            ternary(isfield(organizedData, 'singlePeak'), width(organizedData.singlePeak)-1, 0));
+end
+
+function averagedTable = createPPFAveragedData(dataTable, coverslipFiles)
+    % Create averaged data for PPF with coverslip grouping
+    
+    if width(dataTable) <= 1
+        averagedTable = table();
+        if width(dataTable) == 1
+            averagedTable.Frame = dataTable.Frame;
+        end
+        return;
+    end
+    
+    timeData_ms = dataTable.Frame;
     averagedTable = table();
     averagedTable.Frame = timeData_ms;
     
-    for fileIdx = 1:length(coverslipFiles)
-        fileData = coverslipFiles(fileIdx);
-        csCell = fileData.coverslipCell;
+    % Get unique coverslip cells
+    coverslipCells = unique({coverslipFiles.coverslipCell});
+    
+    for csIdx = 1:length(coverslipCells)
+        csCell = coverslipCells{csIdx};
         
-        % Average all ROIs in this coverslip
-        allColNames = organizedData.Properties.VariableNames;
+        % Find columns for this coverslip
+        allColNames = dataTable.Properties.VariableNames;
         csPattern = sprintf('%s_ROI', csCell);
         csCols = contains(allColNames, csPattern);
         
         if any(csCols)
             csColNames = allColNames(csCols);
-            csData = organizedData(:, csColNames);
+            csData = dataTable(:, csColNames);
             csDataMatrix = table2array(csData);
             meanData = mean(csDataMatrix, 2, 'omitnan');
             nROIs = size(csDataMatrix, 2);
@@ -177,15 +283,15 @@ function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData
             averagedTable.(avgColName) = meanData;
         end
     end
-    
-    averagedData = averagedTable;
-    
-    % Create ROI info
-    roiInfo = struct();
-    roiInfo.coverslipFiles = coverslipFiles;
-    roiInfo.timepoint = timepoint;
-    roiInfo.experimentType = 'PPF';
-    roiInfo.dataType = 'single';
+end
+
+function result = ternary(condition, trueVal, falseVal)
+    % Utility function for ternary operator
+    if condition
+        result = trueVal;
+    else
+        result = falseVal;
+    end
 end
 
 function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData, groupMetadata, cfg)

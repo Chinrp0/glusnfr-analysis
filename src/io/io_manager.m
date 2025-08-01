@@ -211,11 +211,29 @@ function writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, 
     fprintf('    Writing Excel results: %s\n', filename);
     
     try
-        % FIXED: Check if we have actual data
-        if isempty(organizedData) || width(organizedData) <= 1
-            warning('No data to write for group %s', groupKey);
-            return;
-        end
+            % FIXED: Better check for valid data
+            hasValidData = false;
+            
+            if strcmp(roiInfo.experimentType, 'PPF')
+                % For PPF, check if any of the organized data tables have content
+                if isstruct(organizedData)
+                    if (isfield(organizedData, 'allData') && width(organizedData.allData) > 1) || ...
+                       (isfield(organizedData, 'bothPeaks') && width(organizedData.bothPeaks) > 1) || ...
+                       (isfield(organizedData, 'singlePeak') && width(organizedData.singlePeak) > 1)
+                        hasValidData = true;
+                    end
+                end
+            else
+                % For 1AP, check if organized data table has content
+                if istable(organizedData) && width(organizedData) > 1
+                    hasValidData = true;
+                end
+            end
+            
+            if ~hasValidData
+                warning('No data to write for group %s', groupKey);
+                return;
+            end
         
         if strcmp(roiInfo.experimentType, 'PPF')
             writePPFResults(organizedData, averagedData, roiInfo, filepath);
@@ -238,9 +256,86 @@ end
 
 
 function writePPFResults(organizedData, averagedData, roiInfo, filepath)
-    % Write PPF results - simplified for now
-    writeSheetWithCustomHeaders(organizedData, filepath, 'All_Data', 'PPF', roiInfo);
-    writeSheetWithCustomHeaders(averagedData, filepath, 'Averaged', 'PPF', roiInfo);
+    % Write PPF results with separate sheets for different response patterns
+    % Now with robust error handling and fallbacks
+    
+    fprintf('      Writing PPF sheets...\n');
+    
+    sheetsWritten = 0;
+    
+    % Always write All_Data sheet first (this should always exist)
+    if isfield(organizedData, 'allData') && width(organizedData.allData) > 1
+        try
+            writeSheetWithCustomHeaders(organizedData.allData, filepath, 'All_Data', 'PPF', roiInfo);
+            fprintf('      ✓ All_Data sheet: %d columns\n', width(organizedData.allData)-1);
+            sheetsWritten = sheetsWritten + 1;
+        catch ME
+            fprintf('      ⚠ Failed to write All_Data sheet: %s\n', ME.message);
+        end
+    end
+    
+    % Write Both_Peaks sheet if available
+    if isfield(organizedData, 'bothPeaks') && width(organizedData.bothPeaks) > 1
+        try
+            writeSheetWithCustomHeaders(organizedData.bothPeaks, filepath, 'Both_Peaks', 'PPF', roiInfo);
+            fprintf('      ✓ Both_Peaks sheet: %d columns\n', width(organizedData.bothPeaks)-1);
+            sheetsWritten = sheetsWritten + 1;
+        catch ME
+            fprintf('      ⚠ Failed to write Both_Peaks sheet: %s\n', ME.message);
+        end
+    else
+        fprintf('      - No Both_Peaks data available\n');
+    end
+    
+    % Write Single_Peak sheet if available
+    if isfield(organizedData, 'singlePeak') && width(organizedData.singlePeak) > 1
+        try
+            writeSheetWithCustomHeaders(organizedData.singlePeak, filepath, 'Single_Peak', 'PPF', roiInfo);
+            fprintf('      ✓ Single_Peak sheet: %d columns\n', width(organizedData.singlePeak)-1);
+            sheetsWritten = sheetsWritten + 1;
+        catch ME
+            fprintf('      ⚠ Failed to write Single_Peak sheet: %s\n', ME.message);
+        end
+    else
+        fprintf('      - No Single_Peak data available\n');
+    end
+    
+    % Write averaged sheets
+    if isfield(averagedData, 'allData') && width(averagedData.allData) > 1
+        try
+            writeSheetWithCustomHeaders(averagedData.allData, filepath, 'All_Data_Avg', 'PPF', roiInfo);
+            fprintf('      ✓ All_Data_Avg sheet written\n');
+            sheetsWritten = sheetsWritten + 1;
+        catch ME
+            fprintf('      ⚠ Failed to write All_Data_Avg sheet: %s\n', ME.message);
+        end
+    end
+    
+    if isfield(averagedData, 'bothPeaks') && width(averagedData.bothPeaks) > 1
+        try
+            writeSheetWithCustomHeaders(averagedData.bothPeaks, filepath, 'Both_Peaks_Avg', 'PPF', roiInfo);
+            fprintf('      ✓ Both_Peaks_Avg sheet written\n');
+            sheetsWritten = sheetsWritten + 1;
+        catch ME
+            fprintf('      ⚠ Failed to write Both_Peaks_Avg sheet: %s\n', ME.message);
+        end
+    end
+    
+    if isfield(averagedData, 'singlePeak') && width(averagedData.singlePeak) > 1
+        try
+            writeSheetWithCustomHeaders(averagedData.singlePeak, filepath, 'Single_Peak_Avg', 'PPF', roiInfo);
+            fprintf('      ✓ Single_Peak_Avg sheet written\n');
+            sheetsWritten = sheetsWritten + 1;
+        catch ME
+            fprintf('      ⚠ Failed to write Single_Peak_Avg sheet: %s\n', ME.message);
+        end
+    end
+    
+    if sheetsWritten == 0
+        error('No PPF sheets could be written - check data organization');
+    else
+        fprintf('      PPF Excel writing complete: %d sheets written\n', sheetsWritten);
+    end
 end
 
 function write1APResultsComplete(organizedData, averagedData, roiInfo, filepath)
@@ -560,17 +655,31 @@ end
 
 
 function writeMetadataSheet(organizedData, roiInfo, filepath)
-    % FIXED: Write metadata sheet with validation
+    % FIXED: Write metadata sheet with proper PPF structure handling
     
     try
         if strcmp(roiInfo.experimentType, 'PPF')
-            writeMetadataSheetPPF(organizedData, roiInfo, filepath);
+            % For PPF, need to use experiment analyzer to generate metadata
+            analyzer = experiment_analyzer();
+            metadataTable = analyzer.generateMetadata(organizedData, roiInfo, filepath);
         else
             writeMetadataSheet1AP(organizedData, roiInfo, filepath);
         end
-        fprintf('      ✓ ROI_Metadata sheet written\n');
+        
+        if ~isempty(metadataTable)
+            fprintf('      ✓ ROI_Metadata sheet written\n');
+        end
+        
     catch ME
         fprintf('      ⚠ Metadata sheet writing failed: %s\n', ME.message);
+        
+        % Debug: Show what type of data we're trying to process
+        if strcmp(roiInfo.experimentType, 'PPF')
+            fprintf('        Debug: PPF organizedData type = %s\n', class(organizedData));
+            if isstruct(organizedData)
+                fprintf('        Debug: PPF organizedData fields = %s\n', strjoin(fieldnames(organizedData), ', '));
+            end
+        end
     end
 end
 

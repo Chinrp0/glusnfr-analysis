@@ -18,20 +18,31 @@ end
 
 function metadataTable = generateExperimentMetadata(organizedData, roiInfo, filepath)
     % Generate comprehensive metadata for Script 1 optimization
+    % FIXED: Proper PPF metadata handling
     
-    if strcmp(roiInfo.experimentType, 'PPF')
-        metadataTable = generatePPFMetadata(organizedData, roiInfo);
-    else
-        metadataTable = generate1APMetadata(organizedData, roiInfo);
-    end
-    
-    % Save metadata to Excel
-    io = io_manager();
     try
-        writetable(metadataTable, filepath, 'Sheet', 'ROI_Metadata');
-        fprintf('    Metadata sheet written with %d entries\n', height(metadataTable));
+        if strcmp(roiInfo.experimentType, 'PPF')
+            metadataTable = generatePPFMetadata(organizedData, roiInfo);
+        else
+            metadataTable = generate1APMetadata(organizedData, roiInfo);
+        end
+        
+        % Save metadata to Excel if table is valid and not empty
+        if istable(metadataTable) && height(metadataTable) > 0
+            try
+                writetable(metadataTable, filepath, 'Sheet', 'ROI_Metadata');
+                fprintf('    Metadata sheet written with %d entries\n', height(metadataTable));
+            catch ME
+                fprintf('Failed to write metadata to Excel: %s\n', ME.message);
+            end
+        else
+            fprintf('    No metadata to write (empty or invalid table)\n');
+        end
+        
     catch ME
-        fprintf('Failed to write metadata: %s\n', ME.message);
+        fprintf('Failed to generate metadata: %s\n', ME.message);
+        fprintf('Stack trace: %s\n', ME.stack(1).name);
+        metadataTable = table(); % Return empty table on error
     end
 end
 
@@ -106,24 +117,32 @@ function metadataTable = generate1APMetadata(organizedData, roiInfo)
 end
 
 function metadataTable = generatePPFMetadata(organizedData, roiInfo)
-    % Generate PPF-specific metadata
+    % Generate PPF-specific metadata with peak response classification
+    % FIXED: Safe table properties access
     
-    % Calculate maximum entries
+    % Calculate maximum entries across all data tables
     maxEntries = 0;
-    for fileIdx = 1:length(roiInfo.coverslipFiles)
-        maxEntries = maxEntries + length(roiInfo.coverslipFiles(fileIdx).roiNumbers);
+    dataFields = {'allData', 'bothPeaks', 'singlePeak'};
+    
+    for fieldIdx = 1:length(dataFields)
+        fieldName = dataFields{fieldIdx};
+        if isfield(organizedData, fieldName) && istable(organizedData.(fieldName)) && width(organizedData.(fieldName)) > 1
+            maxEntries = maxEntries + (width(organizedData.(fieldName)) - 1); % Subtract 1 for Frame column
+        end
     end
     
     if maxEntries == 0
         metadataTable = table();
+        fprintf('        ⚠ No PPF data available for metadata generation\n');
         return;
     end
     
-    % Preallocate metadata structure
+    % Preallocate metadata structure with new Peak_Response field
     allMetadata = repmat(struct(...
         'CoverslipCell', '', ...
         'ROI_Number', NaN, ...
         'Column_Name', '', ...
+        'Peak_Response', '', ...
         'Threshold_dF_F', NaN, ...
         'Baseline_SD', NaN, ...
         'Baseline_Mean', NaN, ...
@@ -135,43 +154,94 @@ function metadataTable = generatePPFMetadata(organizedData, roiInfo)
     entryCount = 0;
     cfg = GluSnFRConfig();
     
-    for fileIdx = 1:length(roiInfo.coverslipFiles)
-        fileData = roiInfo.coverslipFiles(fileIdx);
-        csCell = fileData.coverslipCell;
+    % Process each data category
+    for fieldIdx = 1:length(dataFields)
+        fieldName = dataFields{fieldIdx};
         
-        for roiIdx = 1:length(fileData.roiNumbers)
-            roiNum = fileData.roiNumbers(roiIdx);
-            columnName = sprintf('%s_ROI%d', csCell, roiNum);
+        if ~isfield(organizedData, fieldName) || ~istable(organizedData.(fieldName)) || width(organizedData.(fieldName)) <= 1
+            continue;
+        end
+        
+        dataTable = organizedData.(fieldName);
+        
+        % FIXED: Direct variable names access without Properties
+        try
+            % Get all variable names from table
+            if istable(dataTable)
+                allVarNames = dataTable.Properties.VariableNames;
+                % Skip Frame column (first column)
+                if length(allVarNames) > 1
+                    varNames = allVarNames(2:end);
+                else
+                    continue; % No data columns
+                end
+            else
+                fprintf('        ⚠ %s is not a valid table\n', fieldName);
+                continue;
+            end
+        catch ME
+            fprintf('        ⚠ Cannot access variable names for %s: %s\n', fieldName, ME.message);
+            continue;
+        end
+        
+        % Determine peak response classification for this data category
+        switch fieldName
+            case 'bothPeaks'
+                peakResponseType = 'Both';
+            case 'singlePeak'
+                peakResponseType = 'Single'; % Will be refined below
+            case 'allData'
+                peakResponseType = 'Unknown'; % Mixed data
+        end
+        
+        for varIdx = 1:length(varNames)
+            varName = varNames{varIdx};
             
-            % Check if column exists and has data
-            if ismember(columnName, organizedData.Properties.VariableNames)
-                columnData = organizedData.(columnName);
-                if ~all(isnan(columnData))
-                    entryCount = entryCount + 1;
-                    allMetadata(entryCount).CoverslipCell = csCell;
-                    allMetadata(entryCount).ROI_Number = roiNum;
-                    allMetadata(entryCount).Column_Name = columnName;
-                    
-                    % Extract threshold and baseline stats
-                    if roiIdx <= length(fileData.thresholds)
-                        threshold = fileData.thresholds(roiIdx);
-                        allMetadata(entryCount).Threshold_dF_F = threshold;
-                        allMetadata(entryCount).Baseline_SD = threshold / cfg.thresholds.SD_MULTIPLIER;
-                        
-                        % Calculate baseline mean from actual data
-                        if ~isempty(fileData.dF_values) && size(fileData.dF_values, 2) >= roiIdx
-                            baselineWindow = cfg.timing.BASELINE_FRAMES;
-                            baselineData = fileData.dF_values(baselineWindow, roiIdx);
-                            allMetadata(entryCount).Baseline_Mean = mean(baselineData, 'omitnan');
-                        else
-                            allMetadata(entryCount).Baseline_Mean = 0;
+            % Parse coverslip and ROI info
+            roiMatch = regexp(varName, '(Cs\d+-c\d+)_ROI(\d+)', 'tokens');
+            if ~isempty(roiMatch)
+                csCell = roiMatch{1}{1};
+                roiNum = str2double(roiMatch{1}{2});
+                
+                % Check if column exists and has data
+                try
+                    if any(strcmp(varName, allVarNames))
+                        columnData = dataTable.(varName);
+                        if ~all(isnan(columnData))
+                            entryCount = entryCount + 1;
+                            allMetadata(entryCount).CoverslipCell = csCell;
+                            allMetadata(entryCount).ROI_Number = roiNum;
+                            allMetadata(entryCount).Column_Name = varName;
+                            
+                            % Set peak response classification
+                            if strcmp(fieldName, 'singlePeak')
+                                % Try to determine if Peak1 or Peak2 from peak response data
+                                specificPeakType = determinePeakType(csCell, roiNum, roiInfo);
+                                if ~isempty(specificPeakType)
+                                    allMetadata(entryCount).Peak_Response = specificPeakType;
+                                else
+                                    allMetadata(entryCount).Peak_Response = 'Single';
+                                end
+                            else
+                                allMetadata(entryCount).Peak_Response = peakResponseType;
+                            end
+                            
+                            % Extract threshold and baseline stats
+                            [threshold, baselineMean] = getROIThresholdAndBaseline(csCell, roiNum, roiInfo, cfg);
+                            if isfinite(threshold)
+                                allMetadata(entryCount).Threshold_dF_F = threshold;
+                                allMetadata(entryCount).Baseline_SD = threshold / cfg.thresholds.SD_MULTIPLIER;
+                            end
+                            allMetadata(entryCount).Baseline_Mean = baselineMean;
+                            
+                            allMetadata(entryCount).Experiment_Type = 'PPF';
+                            allMetadata(entryCount).Timepoint_ms = roiInfo.timepoint;
+                            allMetadata(entryCount).Stimulus1_Time_ms = cfg.timing.STIMULUS_TIME_MS;
+                            allMetadata(entryCount).Stimulus2_Time_ms = cfg.timing.STIMULUS_TIME_MS + roiInfo.timepoint;
                         end
                     end
-                    
-                    allMetadata(entryCount).Experiment_Type = 'PPF';
-                    allMetadata(entryCount).Timepoint_ms = roiInfo.timepoint;
-                    allMetadata(entryCount).Stimulus1_Time_ms = cfg.timing.STIMULUS_TIME_MS;
-                    allMetadata(entryCount).Stimulus2_Time_ms = cfg.timing.STIMULUS_TIME_MS + roiInfo.timepoint;
+                catch ME
+                    fprintf('        ⚠ Error processing column %s: %s\n', varName, ME.message);
                 end
             end
         end
@@ -181,8 +251,71 @@ function metadataTable = generatePPFMetadata(organizedData, roiInfo)
     if entryCount > 0
         allMetadata = allMetadata(1:entryCount);
         metadataTable = struct2table(allMetadata);
+        fprintf('        ✓ PPF metadata: %d entries with peak response classification\n', entryCount);
     else
         metadataTable = table();
+        fprintf('        ⚠ No valid PPF metadata entries created\n');
+    end
+end
+
+function peakType = determinePeakType(csCell, roiNum, roiInfo)
+    % Determine specific peak type (Peak1 or Peak2) for single-response ROIs
+    
+    peakType = '';
+    
+    try
+        for fileIdx = 1:length(roiInfo.coverslipFiles)
+            fileData = roiInfo.coverslipFiles(fileIdx);
+            if strcmp(fileData.coverslipCell, csCell)
+                roiIdx = find(fileData.roiNumbers == roiNum, 1);
+                
+                if ~isempty(roiIdx) && ~isempty(fileData.peakResponses)
+                    if roiIdx <= length(fileData.peakResponses.filteredPeak1Only) && ...
+                       fileData.peakResponses.filteredPeak1Only(roiIdx)
+                        peakType = 'Peak1';
+                        return;
+                    elseif roiIdx <= length(fileData.peakResponses.filteredPeak2Only) && ...
+                           fileData.peakResponses.filteredPeak2Only(roiIdx)
+                        peakType = 'Peak2';
+                        return;
+                    end
+                end
+            end
+        end
+    catch
+        peakType = '';
+    end
+end
+
+function [threshold, baselineMean] = getROIThresholdAndBaseline(csCell, roiNum, roiInfo, cfg)
+    % Get threshold and baseline for specific ROI
+    
+    threshold = NaN;
+    baselineMean = 0;
+    
+    try
+        for fileIdx = 1:length(roiInfo.coverslipFiles)
+            fileData = roiInfo.coverslipFiles(fileIdx);
+            if strcmp(fileData.coverslipCell, csCell)
+                roiIdx = find(fileData.roiNumbers == roiNum, 1);
+                
+                if ~isempty(roiIdx)
+                    if roiIdx <= length(fileData.thresholds)
+                        threshold = fileData.thresholds(roiIdx);
+                    end
+                    
+                    if ~isempty(fileData.dF_values) && size(fileData.dF_values, 2) >= roiIdx
+                        baselineWindow = cfg.timing.BASELINE_FRAMES;
+                        baselineData = fileData.dF_values(baselineWindow, roiIdx);
+                        baselineMean = mean(baselineData, 'omitnan');
+                    end
+                    return;
+                end
+            end
+        end
+    catch
+        threshold = NaN;
+        baselineMean = 0;
     end
 end
 

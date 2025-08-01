@@ -1,8 +1,8 @@
 GluSnFR Pipeline Error Report
-Time: 30-Jul-2025 15:41:32
-Error: No groups processed successfully
+Time: 31-Jul-2025 19:35:33
+Error: No folder selected. Pipeline cancelled.
 
 Stack Trace:
-  validateProcessingResults (line 593)
-  runMainPipeline (line 66)
+  setupFileSystem (line 138)
+  runMainPipeline (line 46)
   main_glusnfr_pipeline (line 27)

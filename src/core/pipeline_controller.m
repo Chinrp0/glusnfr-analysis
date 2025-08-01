@@ -109,17 +109,13 @@ function runMainPipeline()
 end
 
 function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
-    % FIXED: Setup file system with updated folder structure
-    % 
-    % Changes:
-    % - Single plot folder "6_v53_dF_plots" 
-    % - 3 subfolders: ROI_trials, ROI_Averages, Coverslip_Averages
+    % Setup output folder structure
     
     fprintf('Setting up file system...\n');
     
     % ==================== VERSION CONTROL ====================
     % CHANGE THIS NUMBER TO UPDATE ALL FOLDER NAMES
-    VERSION = '53';  % <-- Updated version number
+    VERSION = '55';  % <-- Updated version number
     % ==========================================================
     
     % Default directory (can be customized)

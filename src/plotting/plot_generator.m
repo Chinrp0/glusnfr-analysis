@@ -14,18 +14,58 @@ function plot = plot_generator()
 end
 
 function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outputFolders)
-    % UPDATED: Main plotting dispatcher with new folder structure
-    % 
-    % outputFolders now contains:
-    % - roi_trials, roi_averages, coverslip_averages
+    % UPDATED: Main plotting dispatcher with enhanced debugging
     
     fprintf('    Generating plots for group: %s\n', groupKey);
     
+    % Debug: Show data structure
+    fprintf('      Data structure check:\n');
+    if strcmp(roiInfo.experimentType, 'PPF')
+        fprintf('        Experiment type: PPF\n');
+        if isstruct(organizedData)
+            fprintf('        organizedData is struct with fields: %s\n', strjoin(fieldnames(organizedData), ', '));
+            if isfield(organizedData, 'allData')
+                fprintf('        allData: %s, width=%d\n', class(organizedData.allData), width(organizedData.allData));
+            end
+            if isfield(organizedData, 'bothPeaks')
+                fprintf('        bothPeaks: %s, width=%d\n', class(organizedData.bothPeaks), width(organizedData.bothPeaks));
+            end
+            if isfield(organizedData, 'singlePeak')
+                fprintf('        singlePeak: %s, width=%d\n', class(organizedData.singlePeak), width(organizedData.singlePeak));
+            end
+        else
+            fprintf('        organizedData is %s\n', class(organizedData));
+        end
+    else
+        fprintf('        Experiment type: %s\n', roiInfo.experimentType);
+        fprintf('        organizedData: %s, width=%d\n', class(organizedData), width(organizedData));
+    end
+    
     % Check if we have data to plot
-    if isempty(organizedData) || width(organizedData) <= 1
-        fprintf('    No data to plot for group %s (organized data empty)\n', groupKey);
+    hasData = false;
+    
+    if strcmp(roiInfo.experimentType, 'PPF')
+        % For PPF, check if any of the sub-tables have data
+        if isstruct(organizedData)
+            if (isfield(organizedData, 'allData') && istable(organizedData.allData) && width(organizedData.allData) > 1) || ...
+               (isfield(organizedData, 'bothPeaks') && istable(organizedData.bothPeaks) && width(organizedData.bothPeaks) > 1) || ...
+               (isfield(organizedData, 'singlePeak') && istable(organizedData.singlePeak) && width(organizedData.singlePeak) > 1)
+                hasData = true;
+            end
+        end
+    else
+        % For 1AP, check organized data directly
+        if istable(organizedData) && width(organizedData) > 1
+            hasData = true;
+        end
+    end
+    
+    if ~hasData
+        fprintf('    No valid data structure found for plotting group %s\n', groupKey);
         return;
     end
+    
+    fprintf('      ✓ Valid data found, proceeding with plotting\n');
     
     if strcmp(roiInfo.experimentType, 'PPF')
         generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, outputFolders);
@@ -40,7 +80,7 @@ function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outp
         
         if isfield(averagedData, 'total') && ~isempty(averagedData.total)
             generateCoverslipAveragePlots(averagedData.total, roiInfo, groupKey, ...
-                                        outputFolders.coverslip_averages); % Updated name
+                                        outputFolders.coverslip_averages);
         else
             fprintf('    No total averaged data for plotting\n');
         end
@@ -437,40 +477,98 @@ function generateCoverslipAveragePlots(totalAveragedData, roiInfo, groupKey, plo
 end
 
 function generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, outputFolders)
-    % UPDATED: PPF plotting with new folder structure
+    % FIXED: PPF plotting with correct folder assignment and limited averaged plots
     
     cfg = GluSnFRConfig();
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
-    timeData_ms = organizedData.Frame;
-    stimulusTime_ms1 = cfg.timing.STIMULUS_TIME_MS;
-    stimulusTime_ms2 = stimulusTime_ms1 + roiInfo.timepoint;
     
     % Extract genotype for color coding
     genotype = extractGenotypeFromGroupKey(groupKey);
     
     fprintf('    Generating PPF plots for %s, timepoint=%dms\n', genotype, roiInfo.timepoint);
     
-    % Check if we have data
-    if width(organizedData) <= 1
-        fprintf('    No PPF data to plot\n');
+    % Determine which data to use for plotting
+    plotData = [];
+    
+    % Priority: allData > bothPeaks > singlePeak for individual plots
+    if isstruct(organizedData)
+        if isfield(organizedData, 'allData') && istable(organizedData.allData) && width(organizedData.allData) > 1
+            plotData = organizedData.allData;
+            fprintf('      Using allData for individual plots (%d ROIs)\n', width(plotData)-1);
+        elseif isfield(organizedData, 'bothPeaks') && istable(organizedData.bothPeaks) && width(organizedData.bothPeaks) > 1
+            plotData = organizedData.bothPeaks;
+            fprintf('      Using bothPeaks for individual plots (%d ROIs)\n', width(plotData)-1);
+        elseif isfield(organizedData, 'singlePeak') && istable(organizedData.singlePeak) && width(organizedData.singlePeak) > 1
+            plotData = organizedData.singlePeak;
+            fprintf('      Using singlePeak for individual plots (%d ROIs)\n', width(plotData)-1);
+        end
+    end
+    
+    % Check if we have data to plot
+    if isempty(plotData) || ~istable(plotData)
+        fprintf('    No valid PPF individual data for plotting\n');
+        return;
+    end
+    
+    % Extract time data and stimulus timing
+    try
+        timeData_ms = plotData.Frame;
+        stimulusTime_ms1 = cfg.timing.STIMULUS_TIME_MS;
+        stimulusTime_ms2 = stimulusTime_ms1 + roiInfo.timepoint;
+        
+        fprintf('      PPF timing: Stim1=%dms, Stim2=%dms (interval=%dms)\n', ...
+                stimulusTime_ms1, stimulusTime_ms2, roiInfo.timepoint);
+        
+    catch ME
+        fprintf('    Error extracting time data: %s\n', ME.message);
         return;
     end
     
     % Generate individual plots by coverslip (to ROI_trials folder)
-    generatePPFIndividualPlots(organizedData, roiInfo, genotype, outputFolders.roi_trials, ...
-                              timeData_ms, stimulusTime_ms1, stimulusTime_ms2, cfg);
+    try
+        generatePPFIndividualPlots(plotData, roiInfo, genotype, outputFolders.roi_trials, ...
+                                  timeData_ms, stimulusTime_ms1, stimulusTime_ms2, cfg);
+        fprintf('      ✓ Individual PPF plots generated\n');
+    catch ME
+        fprintf('      ⚠ Individual PPF plots failed: %s\n', ME.message);
+    end
     
-    % Generate averaged plots (to ROI_Averages folder)
-    if ~isempty(averagedData) && width(averagedData) > 1
-        generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype, outputFolders.roi_averages, ...
-                                timeData_ms, stimulusTime_ms1, stimulusTime_ms2, cfg);
+    % Generate ONLY allData and bothPeaks averaged plots (to Coverslip_Averages folder)
+    if isstruct(averagedData)
+        % All Data averaged plots
+        if isfield(averagedData, 'allData') && istable(averagedData.allData) && width(averagedData.allData) > 1
+            try
+                generatePPFAveragedPlots(averagedData.allData, roiInfo, cleanGroupKey, genotype, ...
+                                        outputFolders.coverslip_averages, timeData_ms, ...
+                                        stimulusTime_ms1, stimulusTime_ms2, cfg, 'AllData');
+                fprintf('      ✓ All Data averaged plots generated\n');
+            catch ME
+                fprintf('      ⚠ All Data averaged plots failed: %s\n', ME.message);
+            end
+        end
+        
+        % Both Peaks averaged plots
+        if isfield(averagedData, 'bothPeaks') && istable(averagedData.bothPeaks) && width(averagedData.bothPeaks) > 1
+            try
+                generatePPFAveragedPlots(averagedData.bothPeaks, roiInfo, cleanGroupKey, genotype, ...
+                                        outputFolders.coverslip_averages, timeData_ms, ...
+                                        stimulusTime_ms1, stimulusTime_ms2, cfg, 'BothPeaks');
+                fprintf('      ✓ Both Peaks averaged plots generated\n');
+            catch ME
+                fprintf('      ⚠ Both Peaks averaged plots failed: %s\n', ME.message);
+            end
+        end
+        
+        % Note: No single peak averaged plots as requested
+    else
+        fprintf('      - No averaged data available for plotting\n');
     end
     
     fprintf('    PPF plots complete for genotype %s\n', genotype);
 end
 
 function generatePPFIndividualPlots(organizedData, roiInfo, genotype, plotsFolder, timeData_ms, stimulusTime_ms1, stimulusTime_ms2, cfg)
-    % Generate individual PPF plots by coverslip
+    % Generate individual PPF plots by coverslip with red coloring for single peak traces
     
     dataVarNames = organizedData.Properties.VariableNames(2:end);
     if isempty(dataVarNames)
@@ -488,6 +586,12 @@ function generatePPFIndividualPlots(organizedData, roiInfo, genotype, plotsFolde
                 coverslipCells{end+1} = csCell;
             end
         end
+    end
+    
+    % Determine if this is single peak data (for red coloring)
+    isSinglePeakData = false;
+    if isfield(roiInfo, 'dataType') && strcmp(roiInfo.dataType, 'singlePeak')
+        isSinglePeakData = true;
     end
     
     % Create plots for each coverslip
@@ -529,10 +633,18 @@ function generatePPFIndividualPlots(organizedData, roiInfo, genotype, plotsFolde
                     subplot(nRows, nCols, subplotIdx);
                     hold on;
                     
-                    % Plot in black
+                    % Plot with appropriate color
                     if ~all(isnan(traceData))
                         hasData = true;
-                        plot(timeData_ms, traceData, 'k-', 'LineWidth', 1.0);
+                        
+                        % Determine trace color: red for single peak, black for others
+                        if isSinglePeakData || checkIfSinglePeakROI(varName, csCell, roiInfo)
+                            traceColor = [0.8, 0.2, 0.2]; % Red for single peak
+                        else
+                            traceColor = [0, 0, 0]; % Black for both peaks or unknown
+                        end
+                        
+                        plot(timeData_ms, traceData, 'Color', traceColor, 'LineWidth', 1.0);
                         
                         % Add threshold
                         threshold = getPPFROIThreshold(varName, roiInfo);
@@ -550,7 +662,12 @@ function generatePPFIndividualPlots(organizedData, roiInfo, genotype, plotsFolde
                     % Title
                     roiMatch = regexp(varName, '.*_ROI(\d+)', 'tokens');
                     if ~isempty(roiMatch)
-                        title(sprintf('ROI %s', roiMatch{1}{1}), 'FontSize', 10, 'FontWeight', 'bold');
+                        roiTitle = sprintf('ROI %s', roiMatch{1}{1});
+                        % Add peak type indicator if available
+                        if isSinglePeakData || checkIfSinglePeakROI(varName, csCell, roiInfo)
+                            roiTitle = sprintf('%s (SP)', roiTitle); % SP = Single Peak
+                        end
+                        title(roiTitle, 'FontSize', 10, 'FontWeight', 'bold');
                     end
                     
                     xlabel('Time (ms)', 'FontSize', 8);
@@ -585,8 +702,48 @@ function generatePPFIndividualPlots(organizedData, roiInfo, genotype, plotsFolde
     end
 end
 
-function generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype, plotsFolder, timeData_ms, stimulusTime_ms1, stimulusTime_ms2, cfg)
-    % Generate PPF averaged plots with genotype-specific colors
+function isSinglePeak = checkIfSinglePeakROI(varName, csCell, roiInfo)
+    % Check if a specific ROI is classified as single peak
+    
+    isSinglePeak = false;
+    
+    try
+        % Extract ROI number
+        roiMatch = regexp(varName, 'ROI(\d+)', 'tokens');
+        if ~isempty(roiMatch)
+            roiNum = str2double(roiMatch{1}{1});
+            
+            % Search through coverslip files for this ROI's classification
+            for fileIdx = 1:length(roiInfo.coverslipFiles)
+                fileData = roiInfo.coverslipFiles(fileIdx);
+                if strcmp(fileData.coverslipCell, csCell)
+                    roiIdx = find(fileData.roiNumbers == roiNum, 1);
+                    
+                    if ~isempty(roiIdx) && ~isempty(fileData.peakResponses)
+                        % Check if this ROI is classified as single peak (Peak1 or Peak2 only)
+                        isPeak1Only = roiIdx <= length(fileData.peakResponses.filteredPeak1Only) && ...
+                                      fileData.peakResponses.filteredPeak1Only(roiIdx);
+                        isPeak2Only = roiIdx <= length(fileData.peakResponses.filteredPeak2Only) && ...
+                                      fileData.peakResponses.filteredPeak2Only(roiIdx);
+                        
+                        isSinglePeak = isPeak1Only || isPeak2Only;
+                        return;
+                    end
+                end
+            end
+        end
+    catch
+        isSinglePeak = false;
+    end
+end
+
+function generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype, plotsFolder, timeData_ms, stimulusTime_ms1, stimulusTime_ms2, cfg, plotType)
+    % Generate PPF averaged plots with genotype-specific colors and plot type handling
+    % NEW: plotType parameter ('AllData', 'BothPeaks', or 'SinglePeak')
+    
+    if nargin < 10
+        plotType = 'AllData'; % Default
+    end
     
     if width(averagedData) <= 1
         return;
@@ -595,13 +752,18 @@ function generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype
     avgVarNames = averagedData.Properties.VariableNames(2:end);
     numAvgPlots = length(avgVarNames);
     
-    % Determine trace color
-    if strcmp(genotype, 'WT')
-        traceColor = cfg.colors.WT;
-    elseif strcmp(genotype, 'R213W')
-        traceColor = cfg.colors.R213W;
+    % Determine trace color based on plot type and genotype
+    if strcmp(plotType, 'SinglePeak')
+        traceColor = [0.8, 0.2, 0.2]; % Red for single peak traces
     else
-        traceColor = [0, 0, 1]; % Blue for unknown
+        % Use genotype-specific colors for AllData and BothPeaks
+        if strcmp(genotype, 'WT')
+            traceColor = cfg.colors.WT;
+        elseif strcmp(genotype, 'R213W')
+            traceColor = cfg.colors.R213W;
+        else
+            traceColor = [0, 0, 1]; % Blue for unknown
+        end
     end
     
     maxPlotsPerFigure = cfg.plotting.MAX_PLOTS_PER_FIGURE;
@@ -630,7 +792,7 @@ function generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype
                 if ~all(isnan(avgData))
                     hasData = true;
                     
-                    % Plot in genotype-specific color
+                    % Plot in appropriate color
                     plot(timeData_ms, avgData, 'Color', traceColor, 'LineWidth', 1.0);
                     
                     % Add threshold
@@ -640,10 +802,16 @@ function generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype
                     end
                 end
                 
-                % Title with genotype
+                % Title with genotype and plot type
                 roiMatch = regexp(varName, '(Cs\d+-c\d+)_n(\d+)', 'tokens');
                 if ~isempty(roiMatch)
-                    title(sprintf('%s %s, n=%s', genotype, roiMatch{1}{1}, roiMatch{1}{2}), 'FontSize', 10, 'FontWeight', 'bold');
+                    titleStr = sprintf('%s %s, n=%s', genotype, roiMatch{1}{1}, roiMatch{1}{2});
+                    if strcmp(plotType, 'BothPeaks')
+                        titleStr = sprintf('%s (Both Peaks)', titleStr);
+                    elseif strcmp(plotType, 'SinglePeak')
+                        titleStr = sprintf('%s (Single Peak)', titleStr);
+                    end
+                    title(titleStr, 'FontSize', 10, 'FontWeight', 'bold');
                 else
                     title([genotype ' ' varName], 'FontSize', 10);
                 end
@@ -662,30 +830,38 @@ function generatePPFAveragedPlots(averagedData, roiInfo, cleanGroupKey, genotype
             
             % Only save if we have data
             if hasData
-                % Figure title and save
+                % Figure title and filename based on plot type
+                typeLabel = '';
+                switch plotType
+                    case 'AllData'
+                        typeLabel = 'All Data';
+                    case 'BothPeaks'
+                        typeLabel = 'Both Peaks';
+                    case 'SinglePeak'
+                        typeLabel = 'Single Peak';
+                end
+                
                 if numAvgFigures > 1
-                    titleText = sprintf('PPF %dms %s - Averaged (Part %d/%d)', roiInfo.timepoint, genotype, figNum, numAvgFigures);
-                    avgPlotFile = sprintf('PPF_%dms_%s_averaged_part%d.png', roiInfo.timepoint, genotype, figNum);
+                    titleText = sprintf('PPF %dms %s - %s Averaged (Part %d/%d)', roiInfo.timepoint, genotype, typeLabel, figNum, numAvgFigures);
+                    avgPlotFile = sprintf('PPF_%dms_%s_%s_averaged_part%d.png', roiInfo.timepoint, genotype, plotType, figNum);
                 else
-                    titleText = sprintf('PPF %dms %s - Averaged', roiInfo.timepoint, genotype);
-                    avgPlotFile = sprintf('PPF_%dms_%s_averaged.png', roiInfo.timepoint, genotype);
+                    titleText = sprintf('PPF %dms %s - %s Averaged', roiInfo.timepoint, genotype, typeLabel);
+                    avgPlotFile = sprintf('PPF_%dms_%s_%s_averaged.png', roiInfo.timepoint, genotype, plotType);
                 end
                 
                 sgtitle(titleText, 'FontSize', 14, 'FontWeight', 'bold');
                 print(figAvg, fullfile(plotsFolder, avgPlotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
-                fprintf('      ✓ Generated PPF averaged plot: %s\n', avgPlotFile);
+                fprintf('      ✓ Generated PPF %s averaged plot: %s\n', plotType, avgPlotFile);
             end
             
             close(figAvg);
             
         catch ME
-            fprintf('    ERROR in PPF averaged plot: %s\n', ME.message);
+            fprintf('    ERROR in PPF %s averaged plot: %s\n', plotType, ME.message);
             if exist('figAvg', 'var'), close(figAvg); end
         end
     end
 end
-
-
 
 function [nRows, nCols] = calculateOptimalLayout(nSubplots)
     % Calculate optimal subplot layout
