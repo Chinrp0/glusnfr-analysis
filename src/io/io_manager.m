@@ -200,7 +200,7 @@ function writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, 
     % FIXED: Complete experiment results writing with all expected sheets
     
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
-    filename = [cleanGroupKey '_grouped_v52.xlsx'];
+    filename = [cleanGroupKey '_grouped.xlsx'];
     filepath = fullfile(outputFolder, filename);
     
     % Delete existing file

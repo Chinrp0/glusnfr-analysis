@@ -5,7 +5,10 @@ function config = GluSnFRConfig()
     % Added simple enhanced filtering toggle
     
     %% Version Info
-    config.version = '55'; % Updated for simplified enhanced filtering
+    version_info = PipelineVersion();
+    config.version = version_info.version;
+    config.legacy_version = version_info.legacy_version;
+    config.build_date = version_info.build_date;
     config.created = datestr(now, 'yyyy-mm-dd');
     
     %% Timing Parameters

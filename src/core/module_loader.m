@@ -34,7 +34,8 @@ function modules = module_loader()
         % Step 6: Validate all modules loaded correctly
         validateAllModules(modules);
         
-        fprintf('✓ All modules loaded successfully (v%s)\n', modules.config.version);
+        version_info = PipelineVersion();
+        fprintf('✓ All modules loaded successfully (v%s)\n', version_info.version);
         
     catch ME
         error('Module loading failed: %s\nStack: %s', ME.message, ME.stack(1).name);

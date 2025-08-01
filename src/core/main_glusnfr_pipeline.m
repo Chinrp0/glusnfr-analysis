@@ -10,7 +10,8 @@ function main_glusnfr_pipeline()
     % Display banner
     fprintf('\n');
     fprintf('========================================================\n');
-    fprintf('    GluSnFR Analysis Pipeline v50 - Modular Edition    \n');
+    version_info = PipelineVersion();
+    fprintf('    GluSnFR Analysis Pipeline v%s - %s    \n', version_info.version, version_info.version_name);
     fprintf('========================================================\n');
     fprintf('High-performance analysis for glutamate imaging data\n');
     fprintf('Processing Date: %s\n', char(datetime('now')));

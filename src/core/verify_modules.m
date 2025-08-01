@@ -15,7 +15,8 @@ function verify_modules()
         fprintf('1. Testing configuration module...\n');
         cfg = GluSnFRConfig();
         assert(isfield(cfg, 'version'), 'Config missing version field');
-        fprintf('   ✓ Configuration loaded (v%s)\n', cfg.version);
+        version_info = PipelineVersion();
+        fprintf('   ✓ Configuration loaded (v%s)\n', version_info.version);
         
         % Test 2: Load all modules
         fprintf('2. Testing module loader...\n');

@@ -6,7 +6,8 @@ function setup_pipeline()
     
     fprintf('\n');
     fprintf('===============================================\n');
-    fprintf('  GluSnFR Analysis Pipeline Setup v50\n');
+    version_info = PipelineVersion();
+    fprintf('  GluSnFR Analysis Pipeline Setup v%s\n', version_info.version);  
     fprintf('===============================================\n');
     
     % Get the current directory (where this script is located)

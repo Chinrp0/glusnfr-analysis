@@ -21,8 +21,9 @@ end
 function runMainPipeline()
     % Main pipeline entry point - replaces the monolithic script
     
-    scriptName = 'GluSnFR_Analysis_Pipeline_v52_Modular';
-    fprintf('=== %s ===\n', scriptName);
+    scriptName = 'GluSnFR-Analysis_';
+    version_info = PipelineVersion();
+    fprintf('=== %s v%s ===\n', scriptName, version_info.version);
     fprintf('Modular architecture with optimized processing\n');
     fprintf('Processing Date: %s\n', char(datetime('now')));
     
@@ -115,7 +116,9 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
     
     % ==================== VERSION CONTROL ====================
     % CHANGE THIS NUMBER TO UPDATE ALL FOLDER NAMES
-    VERSION = '55';  % <-- Updated version number
+    version_info = PipelineVersion();
+    VERSION = version_info.legacy_version;  % For folder naming compatibility
+    SEMANTIC_VERSION = version_info.version; % For display/logging
     % ==========================================================
     
     % Default directory (can be customized)
