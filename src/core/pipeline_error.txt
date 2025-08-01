@@ -1,8 +1,8 @@
 GluSnFR Pipeline Error Report
-Time: 31-Jul-2025 10:04:45
-Error: No folder selected. Pipeline cancelled.
+Time: 01-Aug-2025 18:25:38
+Error: Dimensions of arrays being concatenated are not consistent.
 
 Stack Trace:
-  setupFileSystem (line 138)
-  runMainPipeline (line 46)
-  main_glusnfr_pipeline (line 27)
+  setupFileSystem (line 291)
+  runMainPipeline (line 61)
+  main_glusnfr_pipeline (line 28)

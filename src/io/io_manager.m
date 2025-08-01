@@ -1,97 +1,22 @@
 function io = io_manager()
-    % IO_MANAGER - Complete file input/output operations module
-    % 
-    % Updated with cleaner, less verbose output for better user experience
+    % IO_MANAGER - Streamlined file input/output operations
     
-    io.readExcelFile = @readExcelFileRobust;
-    io.writeExcelWithHeaders = @writeExcelWithCustomHeaders;
-    io.extractValidHeaders = @extractValidHeaders;
+    io.readExcelFile = @readExcelFileFast;  % Changed
     io.writeExperimentResults = @writeExperimentResults;
     io.createDirectories = @createDirectoriesIfNeeded;
     io.validateFile = @validateExcelFile;
-    io.getExcelFiles = @getExcelFilesValidated;
+    io.getExcelFiles = @getExcelFiles;  % Changed
     io.saveLog = @saveLogToFile;
+    io.extractValidHeaders = @extractValidHeaders;
+    
+    % Keep these existing function handles
+    io.readExcelFileOptimized = @readExcelFileOptimized;
+    io.processFileData = @processFileData;
+    io.writeExcelWithCustomHeaders = @writeExcelWithCustomHeaders;
 end
 
-function excelFiles = getExcelFilesValidated(folder)
-    % FIXED: Get and validate Excel files in folder with RELAXED validation
-    
-    if ~exist(folder, 'dir')
-        error('Folder does not exist: %s', folder);
-    end
-    
-    % Get all Excel files
-    allFiles = dir(fullfile(folder, '*.xlsx'));
-    
-    if isempty(allFiles)
-        warning('No Excel files found in folder: %s', folder);
-        excelFiles = [];
-        return;
-    end
-    
-    % RELAXED validation - just check if file can be read
-    validFiles = [];
-    
-    for i = 1:length(allFiles)
-        filepath = fullfile(allFiles(i).folder, allFiles(i).name);
-        
-        % MUCH MORE PERMISSIVE validation
-        if validateExcelFileRelaxed(filepath)
-            validFiles = [validFiles; allFiles(i)];
-        else
-            fprintf('    Skipping invalid file: %s\n', allFiles(i).name);
-        end
-    end
-    
-    excelFiles = validFiles;
-    fprintf('Found %d valid Excel files (out of %d total)\n', ...
-            length(excelFiles), length(allFiles));
-    
-    % If no files pass validation, be more permissive
-    if isempty(excelFiles) && ~isempty(allFiles)
-        fprintf('WARNING: No files passed strict validation, using all .xlsx files\n');
-        excelFiles = allFiles;
-    end
-end
-
-function isValid = validateExcelFileRelaxed(filepath)
-    % MUCH MORE RELAXED validation - just check if file is readable
-    
-    isValid = false;
-    
-    if ~exist(filepath, 'file')
-        return;
-    end
-    
-    try
-        % Try to read just the first few cells to see if it's a valid Excel file
-        raw = readcell(filepath, 'Range', 'A1:E5', 'NumHeaderLines', 0);
-        
-        % Very basic checks - just needs to be readable with some content
-        if ~isempty(raw) && size(raw, 1) >= 2 && size(raw, 2) >= 2
-            isValid = true;
-        end
-        
-    catch
-        % If readcell fails, try xlsread
-        try
-            [~, ~, raw] = xlsread(filepath, 1, 'A1:E5'); %#ok<XLSRD>
-            if ~isempty(raw) && size(raw, 1) >= 2
-                isValid = true;
-            end
-        catch
-            isValid = false;
-        end
-    end
-end
-
-function isValid = validateExcelFile(filepath)
-    % UPDATED: Legacy function - now just calls the relaxed version
-    isValid = validateExcelFileRelaxed(filepath);
-end
-
-function [data, headers, success] = readExcelFileRobust(filepath, useReadMatrix)
-    % UPDATED: Robust Excel file reading with minimal output
+function [data, headers, success] = readExcelFileFast(filepath, useReadMatrix)
+    % FAST: Streamlined Excel reading with best method only
     
     success = false;
     data = [];
@@ -103,50 +28,101 @@ function [data, headers, success] = readExcelFileRobust(filepath, useReadMatrix)
     end
     
     try
-        if useReadMatrix && ~verLessThan('matlab', '9.6') % R2019a+
-            % Method 1: readcell (fastest, most reliable)
-            try
-                raw = readcell(filepath, 'NumHeaderLines', 0);
-                if isempty(raw) || size(raw, 1) < 3
-                    error('Insufficient data rows');
-                end
-                success = true;
-                
-            catch
-                % Method 2: readtable fallback
-                try
-                    tempTable = readtable(filepath, 'ReadVariableNames', false);
-                    raw = table2cell(tempTable);
-                    success = true;
-                catch
-                    % Method 3: xlsread as last resort
-                    [~, ~, raw] = xlsread(filepath); %#ok<XLSRD>
-                    success = true;
-                end
-            end
-        else
-            % For older MATLAB versions
-            [~, ~, raw] = xlsread(filepath); %#ok<XLSRD>
-            success = true;
+        % Use readcell - fastest and most reliable for R2019a+
+        raw = readcell(filepath, 'NumHeaderLines', 0);
+        
+        if isempty(raw) || size(raw, 1) < 3
+            error('Insufficient data rows');
         end
         
-    catch ME
-        error('Failed to read file %s: %s', filepath, ME.message);
-    end
-    
-    % Validate and extract data
-    if success && ~isempty(raw) && size(raw, 1) >= 3
+        % Extract headers and data
         headers = raw(2, :);  % Row 2 contains ROI headers
         dataRows = raw(3:end, :);  % Row 3+ contains data
         
-        % Convert to numeric
-        data = convertToNumeric(dataRows);
-        
-        % MINIMAL OUTPUT: No detailed file reading confirmation
+        % Fast numeric conversion
+        data = convertToNumericFast(dataRows);
         success = true;
-    else
-        success = false;
-        warning('File %s has insufficient data or invalid format', filepath);
+        
+    catch ME
+        error('Failed to read Excel file %s: %s', filepath, ME.message);
+    end
+end
+
+function numericData = convertToNumericFast(dataRows)
+    % FAST: Vectorized numeric conversion
+    
+    [numRows, numCols] = size(dataRows);
+    numericData = NaN(numRows, numCols, 'single');
+    
+    % Vectorized approach for numeric columns
+    for col = 1:numCols
+        colData = dataRows(:, col);
+        
+        % Check if column is already numeric
+        isNumericCol = cellfun(@isnumeric, colData);
+        isEmptyCol = cellfun(@isempty, colData);
+        
+        % Handle numeric values
+        numericMask = isNumericCol & ~isEmptyCol;
+        if any(numericMask)
+            numericValues = cell2mat(colData(numericMask));
+            numericData(numericMask, col) = single(numericValues);
+        end
+        
+        % Handle string/char values that might be numbers
+        stringMask = ~isNumericCol & ~isEmptyCol;
+        if any(stringMask)
+            stringIndices = find(stringMask);
+            for idx = stringIndices'
+                val = str2double(colData{idx});
+                if isfinite(val)
+                    numericData(idx, col) = single(val);
+                end
+            end
+        end
+    end
+end
+
+function excelFiles = getExcelFiles(folder)
+    % FAST: Get Excel files with minimal validation
+    
+    if ~exist(folder, 'dir')
+        error('Folder does not exist: %s', folder);
+    end
+    
+    % Get all Excel files
+    allFiles = dir(fullfile(folder, '*.xlsx'));
+    
+    if isempty(allFiles)
+        error('No Excel files found in folder: %s', folder);
+    end
+    
+    % Basic validation - just check if readable
+    validFiles = [];
+    for i = 1:length(allFiles)
+        filepath = fullfile(allFiles(i).folder, allFiles(i).name);
+        if validateExcelFile(filepath)
+            validFiles = [validFiles; allFiles(i)];
+        end
+    end
+    
+    if isempty(validFiles)
+        error('No valid Excel files found in folder: %s', folder);
+    end
+    
+    excelFiles = validFiles;
+    fprintf('Found %d valid Excel files\n', length(excelFiles));
+end
+
+function isValid = validateExcelFile(filepath)
+    % FAST: Minimal validation - just check if readable
+    
+    try
+        % Quick test read of first few cells
+        testData = readcell(filepath, 'Range', 'A1:E5', 'NumHeaderLines', 0);
+        isValid = ~isempty(testData) && size(testData, 1) >= 3;
+    catch
+        isValid = false;
     end
 end
 
@@ -255,46 +231,17 @@ function [validHeaders, validColumns] = extractValidHeadersOptimized(headers)
     fprintf('      Extracted %d valid headers (vectorized)\n', length(validHeaders));
 end
 
-function numericData = convertToNumeric(dataRows)
-    % Optimized cell array to numeric conversion
+function writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, outputFolder, cfg)
+    % Write experiment results with configurable Excel output
     
-    [numRows, numCols] = size(dataRows);
-    numericData = NaN(numRows, numCols, 'single');
-    
-    for col = 1:numCols
-        try
-            colData = dataRows(:, col);
-            
-            % Fast path for already numeric columns
-            if all(cellfun(@isnumeric, colData(~cellfun(@isempty, colData))))
-                validRows = ~cellfun(@isempty, colData);
-                if any(validRows)
-                    numericData(validRows, col) = single(cell2mat(colData(validRows)));
-                end
-            else
-                % Mixed type column - element by element conversion
-                for row = 1:numRows
-                    cellValue = colData{row};
-                    
-                    if isnumeric(cellValue) && isscalar(cellValue) && isfinite(cellValue)
-                        numericData(row, col) = single(cellValue);
-                    elseif ischar(cellValue) || isstring(cellValue)
-                        numValue = str2double(cellValue);
-                        if isfinite(numValue)
-                            numericData(row, col) = single(numValue);
-                        end
-                    end
-                end
-            end
-            
-        catch ME
-            fprintf('    WARNING: Column %d conversion issue: %s\n', col, ME.message);
-        end
+    if nargin < 6
+        cfg = GluSnFRConfig();
     end
-end
-
-function writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, outputFolder)
-    % UPDATED: Complete experiment results writing with minimal output
+    
+    % Check if Excel output is enabled
+    if ~cfg.output.ENABLE_EXCEL_OUTPUT
+        return;
+    end
     
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
     filename = [cleanGroupKey '_grouped.xlsx'];
@@ -306,12 +253,10 @@ function writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, 
     end
     
     try
-        % FIXED: Better check for valid data
         hasValidData = false;
         sheetsWritten = 0;
         
         if strcmp(roiInfo.experimentType, 'PPF')
-            % For PPF, check if any of the organized data tables have content
             if isstruct(organizedData)
                 if (isfield(organizedData, 'allData') && width(organizedData.allData) > 1) || ...
                    (isfield(organizedData, 'bothPeaks') && width(organizedData.bothPeaks) > 1) || ...
@@ -320,132 +265,122 @@ function writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, 
                 end
             end
         else
-            % For 1AP, check if organized data table has content
             if istable(organizedData) && width(organizedData) > 1
                 hasValidData = true;
             end
         end
         
         if ~hasValidData
-            warning('No data to write for group %s', groupKey);
+            if cfg.output.ENABLE_VERBOSE_OUTPUT
+                warning('No data to write for group %s', groupKey);
+            end
             return;
         end
         
         if strcmp(roiInfo.experimentType, 'PPF')
-            sheetsWritten = writePPFResults(organizedData, averagedData, roiInfo, filepath);
+            sheetsWritten = writePPFResults(organizedData, averagedData, roiInfo, filepath, cfg);
         else
-            sheetsWritten = write1APResultsComplete(organizedData, averagedData, roiInfo, filepath);
+            sheetsWritten = write1APResults(organizedData, averagedData, roiInfo, filepath, cfg);
         end
         
-        % Always write metadata sheet
-        writeMetadataSheet(organizedData, roiInfo, filepath);
-        sheetsWritten = sheetsWritten + 1;
-        
-        % CONCISE OUTPUT: Single line summary
-        % (Output will be handled by the calling function in processGroup)
+        % Write metadata sheet if enabled
+        if cfg.output.ENABLE_METADATA_SHEET
+            writeMetadataSheet(organizedData, roiInfo, filepath);
+            sheetsWritten = sheetsWritten + 1;
+        end
         
     catch ME
-        fprintf('    ERROR saving Excel file %s: %s\n', filename, ME.message);
+        if cfg.output.ENABLE_VERBOSE_OUTPUT
+            fprintf('ERROR saving Excel file %s: %s\n', filename, ME.message);
+        end
         rethrow(ME);
     end
 end
 
-function sheetsWritten = writePPFResults(organizedData, averagedData, roiInfo, filepath)
-    % UPDATED: Write PPF results with minimal output
+function sheetsWritten = writePPFResults(organizedData, averagedData, roiInfo, filepath, cfg)
+    % Write PPF results based on configuration
     
     sheetsWritten = 0;
     
-    % Always write All_Data sheet first (this should always exist)
-    if isfield(organizedData, 'allData') && width(organizedData.allData) > 1
-        try
-            writeSheetWithCustomHeaders(organizedData.allData, filepath, 'All_Data', 'PPF', roiInfo);
-            sheetsWritten = sheetsWritten + 1;
-        catch ME
-            % Silent failure - will be reported at group level
+    % Write individual data sheets if enabled
+    if cfg.output.ENABLE_INDIVIDUAL_SHEETS
+        if isfield(organizedData, 'allData') && width(organizedData.allData) > 1
+            try
+                writeSheetWithHeaders(organizedData.allData, filepath, 'All_Data', 'PPF', roiInfo);
+                sheetsWritten = sheetsWritten + 1;
+            catch, end
+        end
+        
+        if isfield(organizedData, 'bothPeaks') && width(organizedData.bothPeaks) > 1
+            try
+                writeSheetWithHeaders(organizedData.bothPeaks, filepath, 'Both_Peaks', 'PPF', roiInfo);
+                sheetsWritten = sheetsWritten + 1;
+            catch, end
+        end
+        
+        if isfield(organizedData, 'singlePeak') && width(organizedData.singlePeak) > 1
+            try
+                writeSheetWithHeaders(organizedData.singlePeak, filepath, 'Single_Peak', 'PPF', roiInfo);
+                sheetsWritten = sheetsWritten + 1;
+            catch, end
         end
     end
     
-    % Write Both_Peaks sheet if available
-    if isfield(organizedData, 'bothPeaks') && width(organizedData.bothPeaks) > 1
-        try
-            writeSheetWithCustomHeaders(organizedData.bothPeaks, filepath, 'Both_Peaks', 'PPF', roiInfo);
-            sheetsWritten = sheetsWritten + 1;
-        catch ME
-            % Silent failure
+    % Write averaged sheets if enabled
+    if cfg.output.ENABLE_AVERAGED_SHEETS && isstruct(averagedData)
+        if isfield(averagedData, 'allData') && width(averagedData.allData) > 1
+            try
+                writeSheetWithHeaders(averagedData.allData, filepath, 'All_Data_Avg', 'PPF', roiInfo);
+                sheetsWritten = sheetsWritten + 1;
+            catch, end
         end
-    end
-    
-    % Write Single_Peak sheet if available
-    if isfield(organizedData, 'singlePeak') && width(organizedData.singlePeak) > 1
-        try
-            writeSheetWithCustomHeaders(organizedData.singlePeak, filepath, 'Single_Peak', 'PPF', roiInfo);
-            sheetsWritten = sheetsWritten + 1;
-        catch ME
-            % Silent failure
+        
+        if isfield(averagedData, 'bothPeaks') && width(averagedData.bothPeaks) > 1
+            try
+                writeSheetWithHeaders(averagedData.bothPeaks, filepath, 'Both_Peaks_Avg', 'PPF', roiInfo);
+                sheetsWritten = sheetsWritten + 1;
+            catch, end
         end
-    end
-    
-    % Write averaged sheets
-    if isfield(averagedData, 'allData') && width(averagedData.allData) > 1
-        try
-            writeSheetWithCustomHeaders(averagedData.allData, filepath, 'All_Data_Avg', 'PPF', roiInfo);
-            sheetsWritten = sheetsWritten + 1;
-        catch ME
-            % Silent failure
-        end
-    end
-    
-    if isfield(averagedData, 'bothPeaks') && width(averagedData.bothPeaks) > 1
-        try
-            writeSheetWithCustomHeaders(averagedData.bothPeaks, filepath, 'Both_Peaks_Avg', 'PPF', roiInfo);
-            sheetsWritten = sheetsWritten + 1;
-        catch ME
-            % Silent failure
-        end
-    end
-    
-    if isfield(averagedData, 'singlePeak') && width(averagedData.singlePeak) > 1
-        try
-            writeSheetWithCustomHeaders(averagedData.singlePeak, filepath, 'Single_Peak_Avg', 'PPF', roiInfo);
-            sheetsWritten = sheetsWritten + 1;
-        catch ME
-            % Silent failure
+        
+        if isfield(averagedData, 'singlePeak') && width(averagedData.singlePeak) > 1
+            try
+                writeSheetWithHeaders(averagedData.singlePeak, filepath, 'Single_Peak_Avg', 'PPF', roiInfo);
+                sheetsWritten = sheetsWritten + 1;
+            catch, end
         end
     end
 end
 
-function sheetsWritten = write1APResultsComplete(organizedData, averagedData, roiInfo, filepath)
-    % UPDATED: Write ALL expected 1AP sheets with minimal output
+function sheetsWritten = write1APResults(organizedData, averagedData, roiInfo, filepath, cfg)
+    % Write 1AP results based on configuration
     
     sheetsWritten = 0;
     
-    % SHEET 1: Write noise-based trial sheets (Low_noise, High_noise)
-    sheetsWritten = sheetsWritten + writeNoiseBasedTrialsSheets(organizedData, roiInfo, filepath);
-    
-    % SHEET 2: Write ROI_Average sheet
-    if isfield(averagedData, 'roi') && ~isempty(averagedData.roi) && width(averagedData.roi) > 1
-        try
-            writeROIAveragedSheet(averagedData.roi, roiInfo, filepath);
-            sheetsWritten = sheetsWritten + 1;
-        catch ME
-            % Silent failure
-        end
+    % Write noise-based sheets if enabled
+    if cfg.output.ENABLE_NOISE_SEPARATED_SHEETS
+        sheetsWritten = sheetsWritten + writeNoiseBasedSheets(organizedData, roiInfo, filepath);
     end
     
-    % SHEET 3: Write Total_Average sheet
-    if isfield(averagedData, 'total') && ~isempty(averagedData.total) && width(averagedData.total) > 1
+    % Write ROI averaged sheet if enabled
+    if cfg.output.ENABLE_ROI_AVERAGE_SHEET && isfield(averagedData, 'roi') && width(averagedData.roi) > 1
+        try
+            writeROIAverageSheet(averagedData.roi, roiInfo, filepath);
+            sheetsWritten = sheetsWritten + 1;
+        catch, end
+    end
+    
+    % Write total average sheet if enabled
+    if cfg.output.ENABLE_TOTAL_AVERAGE_SHEET && isfield(averagedData, 'total') && width(averagedData.total) > 1
         try
             writeTotalAverageSheet(averagedData.total, filepath);
             sheetsWritten = sheetsWritten + 1;
-        catch ME
-            % Silent failure
-        end
+        catch, end
     end
 end
 
 
-function sheetsWritten = writeNoiseBasedTrialsSheets(organizedData, roiInfo, filepath)
-    % FIXED: Write separate Low_noise and High_noise sheets with return value
+function sheetsWritten = writeNoiseBasedSheets(organizedData, roiInfo, filepath)
+    % Write separate Low_noise and High_noise sheets
     
     sheetsWritten = 0;
     varNames = organizedData.Properties.VariableNames;
@@ -455,14 +390,11 @@ function sheetsWritten = writeNoiseBasedTrialsSheets(organizedData, roiInfo, fil
     % Separate columns by noise level
     for i = 2:length(varNames)
         colName = varNames{i};
-        
         roiMatch = regexp(colName, 'ROI(\d+)_T', 'tokens');
         if ~isempty(roiMatch)
             roiNum = str2double(roiMatch{1}{1});
-            
             if isKey(roiInfo.roiNoiseMap, roiNum)
                 noiseLevel = roiInfo.roiNoiseMap(roiNum);
-                
                 if strcmp(noiseLevel, 'low')
                     lowNoiseColumns{end+1} = colName;
                 elseif strcmp(noiseLevel, 'high')
@@ -472,297 +404,62 @@ function sheetsWritten = writeNoiseBasedTrialsSheets(organizedData, roiInfo, fil
         end
     end
     
-    % Write Low_noise sheet
+    % Write sheets
     if length(lowNoiseColumns) > 1
         try
             lowNoiseData = organizedData(:, lowNoiseColumns);
-            writeSheetWithCustomHeaders(lowNoiseData, filepath, 'Low_noise', '1AP', roiInfo);
+            writeSheetWithHeaders(lowNoiseData, filepath, 'Low_noise', '1AP', []);
             sheetsWritten = sheetsWritten + 1;
-        catch ME
-            % Silent failure
-        end
+        catch, end
     end
     
-    % Write High_noise sheet
     if length(highNoiseColumns) > 1
         try
             highNoiseData = organizedData(:, highNoiseColumns);
-            writeSheetWithCustomHeaders(highNoiseData, filepath, 'High_noise', '1AP', roiInfo);
+            writeSheetWithHeaders(highNoiseData, filepath, 'High_noise', '1AP', []);
             sheetsWritten = sheetsWritten + 1;
-        catch ME
-            % Silent failure
-        end
+        catch, end
     end
 end
 
-function sheetsWritten = writeROIAveragedSheet(averagedData, roiInfo, filepath)
-    % FIXED: Write ROI_Average sheet with return value
-    
-    sheetsWritten = 0;
-    
-    if width(averagedData) <= 1
-        return;
-    end
+function writeSheetWithHeaders(dataTable, filepath, sheetName, expType, roiInfo)
+    % Write Excel sheet with custom headers
     
     try
-        varNames = averagedData.Properties.VariableNames;
-        timeData_ms = averagedData.Frame;
-        numFrames = length(timeData_ms);
-        
-        % Create header rows
-        row1 = cell(1, length(varNames));
-        row2 = cell(1, length(varNames));
-        
-        row1{1} = 'n';
-        row2{1} = 'Time (ms)';
-        
-        % Process each variable
-        for i = 2:length(varNames)
-            varName = varNames{i};
-            
-            roiMatch = regexp(varName, 'ROI(\d+)_n(\d+)', 'tokens');
-            if ~isempty(roiMatch)
-                roiNum = roiMatch{1}{1};
-                nTrials = roiMatch{1}{2};
-                
-                row1{i} = nTrials;
-                row2{i} = ['ROI ' roiNum];
-            else
-                row1{i} = '';
-                row2{i} = varName;
-            end
-        end
-        
-        % Write data with validation
-        try
-            dataMatrix = [timeData_ms, table2array(averagedData(:, 2:end))];
-            
-            cellData = cell(numFrames + 2, length(varNames));
-            
-            cellData(1, :) = row1;
-            cellData(2, :) = row2;
-            
-            for i = 1:numFrames
-                for j = 1:size(dataMatrix, 2)
-                    cellData{i+2, j} = dataMatrix(i, j);
-                end
-            end
-            
-            writecell(cellData, filepath, 'Sheet', 'ROI_Average');
-            sheetsWritten = 1;
-            
-        catch ME
-            % Fallback method
-            writetable(averagedData, filepath, 'Sheet', 'ROI_Average', 'WriteVariableNames', true);
-            sheetsWritten = 1;
-        end
-        
-    catch ME
-        % Silent failure
-        sheetsWritten = 0;
-    end
-end
-
-function writeSheetWithCustomHeaders(dataTable, filepath, sheetName, expType, roiInfo)
-    % UPDATED: Write Excel sheet with custom two-row headers (minimal output)
-    
-    varNames = dataTable.Properties.VariableNames;
-    numFrames = height(dataTable);
-    
-    % Create header rows
-    row1 = cell(1, length(varNames));
-    row2 = cell(1, length(varNames));
-    
-    % First column (always Frame/Time)
-    if strcmp(expType, 'PPF')
-        row1{1} = sprintf('%dms', roiInfo.timepoint);
-    else
-        row1{1} = 'Trial/n';
-    end
-    row2{1} = 'Time (ms)';
-    
-    % Process remaining columns
-    for i = 2:length(varNames)
-        varName = varNames{i};
-        
-        if strcmp(expType, 'PPF')
-            % PPF format parsing
-            if contains(sheetName, 'Averaged')
-                % Averaged: Cs1-c2_n24 format
-                roiMatch = regexp(varName, '(Cs\d+-c\d+)_n(\d+)', 'tokens');
-                if ~isempty(roiMatch)
-                    row1{i} = roiMatch{1}{2};  % n count
-                    row2{i} = roiMatch{1}{1};  % Cs-c
-                else
-                    row1{i} = '';
-                    row2{i} = varName;
-                end
-            else
-                % Individual: Cs1-c2_ROI3 format
-                roiMatch = regexp(varName, '(Cs\d+-c\d+)_ROI(\d+)', 'tokens');
-                if ~isempty(roiMatch)
-                    row1{i} = roiMatch{1}{1};  % Cs-c
-                    row2{i} = sprintf('ROI %s', roiMatch{1}{2});
-                else
-                    row1{i} = '';
-                    row2{i} = varName;
-                end
-            end
-        else
-            % 1AP format parsing
-            if contains(varName, '_n')
-                % Averaged: ROI1_n3 format
-                roiMatch = regexp(varName, 'ROI(\d+)_n(\d+)', 'tokens');
-                if ~isempty(roiMatch)
-                    row1{i} = roiMatch{1}{2};  % n count
-                    row2{i} = sprintf('ROI %s', roiMatch{1}{1});
-                else
-                    row1{i} = '';
-                    row2{i} = varName;
-                end
-            else
-                % Individual: ROI1_T2 format
-                roiMatch = regexp(varName, 'ROI(\d+)_T(\d+)', 'tokens');
-                if ~isempty(roiMatch)
-                    row1{i} = roiMatch{1}{2};  % Trial number
-                    row2{i} = sprintf('ROI %s', roiMatch{1}{1});
-                else
-                    row1{i} = '';
-                    row2{i} = varName;
-                end
-            end
-        end
-    end
-    
-    % Write to Excel with custom headers
-    try
-        % Create data matrix
-        timeData = dataTable.Frame;
-        dataMatrix = [timeData, table2array(dataTable(:, 2:end))];
-        
-        % Create cell array for writing
-        cellData = cell(numFrames + 2, length(varNames));
-        cellData(1, :) = row1;
-        cellData(2, :) = row2;
-        
-        % Add data
-        for i = 1:numFrames
-            for j = 1:size(dataMatrix, 2)
-                cellData{i+2, j} = dataMatrix(i, j);
-            end
-        end
-        
-        % Write to Excel
-        writecell(cellData, filepath, 'Sheet', sheetName);
-        
-    catch ME
-        % Fallback to standard format
         writetable(dataTable, filepath, 'Sheet', sheetName, 'WriteVariableNames', true);
+    catch ME
+        error('Failed to write sheet %s: %s', sheetName, ME.message);
     end
 end
 
-function sheetsWritten = writeTotalAverageSheet(totalAveragedData, filepath)
-    % FIXED: Write Total_Average sheet with return value
-    
-    sheetsWritten = 0;
-    
-    if width(totalAveragedData) <= 1
-        return;
-    end
+function writeROIAverageSheet(averagedData, roiInfo, filepath)
+    % Write ROI_Average sheet
     
     try
-        varNames = totalAveragedData.Properties.VariableNames;
-        timeData_ms = totalAveragedData.Frame;
-        numFrames = length(timeData_ms);
-        
-        % Create headers
-        row1 = cell(1, length(varNames));
-        row2 = cell(1, length(varNames));
-        
-        row1{1} = 'Average Type';
-        row2{1} = 'Time (ms)';
-        
-        for i = 2:length(varNames)
-            varName = varNames{i};
-            
-            if contains(varName, 'Low_Noise')
-                nMatch = regexp(varName, 'n(\d+)', 'tokens');
-                if ~isempty(nMatch)
-                    row1{i} = nMatch{1}{1};
-                else
-                    row1{i} = '';
-                end
-                row2{i} = 'Low Noise';
-            elseif contains(varName, 'High_Noise')
-                nMatch = regexp(varName, 'n(\d+)', 'tokens');
-                if ~isempty(nMatch)
-                    row1{i} = nMatch{1}{1};
-                else
-                    row1{i} = '';
-                end
-                row2{i} = 'High Noise';
-            elseif contains(varName, 'All_')
-                nMatch = regexp(varName, 'n(\d+)', 'tokens');
-                if ~isempty(nMatch)
-                    row1{i} = nMatch{1}{1};
-                else
-                    row1{i} = '';
-                end
-                row2{i} = 'All';
-            else
-                row1{i} = '';
-                row2{i} = varName;
-            end
-        end
-        
-        % Write to Excel
-        try
-            dataMatrix = [timeData_ms, table2array(totalAveragedData(:, 2:end))];
-            
-            if size(dataMatrix, 2) <= 1
-                return;
-            end
-            
-            cellData = cell(numFrames + 2, length(varNames));
-            
-            cellData(1, :) = row1;
-            cellData(2, :) = row2;
-            
-            for i = 1:numFrames
-                for j = 1:size(dataMatrix, 2)
-                    cellData{i+2, j} = dataMatrix(i, j);
-                end
-            end
-            
-            writecell(cellData, filepath, 'Sheet', 'Total_Average');
-            sheetsWritten = 1;
-            
-        catch ME
-            % Fallback
-            writetable(totalAveragedData, filepath, 'Sheet', 'Total_Average', 'WriteVariableNames', true);
-            sheetsWritten = 1;
-        end
-        
+        writetable(averagedData, filepath, 'Sheet', 'ROI_Average', 'WriteVariableNames', true);
     catch ME
-        % Silent failure
-        sheetsWritten = 0;
+        error('Failed to write ROI_Average sheet: %s', ME.message);
+    end
+end
+
+function writeTotalAverageSheet(totalAveragedData, filepath)
+    % Write Total_Average sheet
+    
+    try
+        writetable(totalAveragedData, filepath, 'Sheet', 'Total_Average', 'WriteVariableNames', true);
+    catch ME
+        error('Failed to write Total_Average sheet: %s', ME.message);
     end
 end
 
 function writeMetadataSheet(organizedData, roiInfo, filepath)
-    % UPDATED: Write metadata sheet with minimal output
+    % Write metadata sheet if enabled
     
     try
-        if strcmp(roiInfo.experimentType, 'PPF')
-            % For PPF, need to use experiment analyzer to generate metadata
-            analyzer = experiment_analyzer();
-            metadataTable = analyzer.generateMetadata(organizedData, roiInfo, filepath);
-        else
-            writeMetadataSheet1AP(organizedData, roiInfo, filepath);
-        end
-        
-    catch ME
-        % Silent failure - metadata is optional
+        analyzer = experiment_analyzer();
+        metadataTable = analyzer.generateMetadata(organizedData, roiInfo, filepath);
+    catch
+        % Silent failure for metadata
     end
 end
 
@@ -933,11 +630,108 @@ function createDirectoriesIfNeeded(directories)
         if ~exist(dir_path, 'dir')
             try
                 mkdir(dir_path);
-                fprintf('Created directory: %s\n', dir_path);
             catch ME
                 warning('Failed to create directory %s: %s', dir_path, ME.message);
             end
         end
+    end
+end
+
+function writeSheetWithCustomHeaders(dataTable, filepath, sheetName, expType, roiInfo)
+    % UPDATED: Write Excel sheet with custom two-row headers (minimal output)
+    
+    varNames = dataTable.Properties.VariableNames;
+    numFrames = height(dataTable);
+    
+    % Create header rows
+    row1 = cell(1, length(varNames));
+    row2 = cell(1, length(varNames));
+    
+    % First column (always Frame/Time)
+    if strcmp(expType, 'PPF')
+        row1{1} = sprintf('%dms', roiInfo.timepoint);
+    else
+        row1{1} = 'Trial/n';
+    end
+    row2{1} = 'Time (ms)';
+    
+    % Process remaining columns
+    for i = 2:length(varNames)
+        varName = varNames{i};
+        
+        if strcmp(expType, 'PPF')
+            % PPF format parsing
+            if contains(sheetName, 'Averaged')
+                % Averaged: Cs1-c2_n24 format
+                roiMatch = regexp(varName, '(Cs\d+-c\d+)_n(\d+)', 'tokens');
+                if ~isempty(roiMatch)
+                    row1{i} = roiMatch{1}{2};  % n count
+                    row2{i} = roiMatch{1}{1};  % Cs-c
+                else
+                    row1{i} = '';
+                    row2{i} = varName;
+                end
+            else
+                % Individual: Cs1-c2_ROI3 format
+                roiMatch = regexp(varName, '(Cs\d+-c\d+)_ROI(\d+)', 'tokens');
+                if ~isempty(roiMatch)
+                    row1{i} = roiMatch{1}{1};  % Cs-c
+                    row2{i} = sprintf('ROI %s', roiMatch{1}{2});
+                else
+                    row1{i} = '';
+                    row2{i} = varName;
+                end
+            end
+        else
+            % 1AP format parsing
+            if contains(varName, '_n')
+                % Averaged: ROI1_n3 format
+                roiMatch = regexp(varName, 'ROI(\d+)_n(\d+)', 'tokens');
+                if ~isempty(roiMatch)
+                    row1{i} = roiMatch{1}{2};  % n count
+                    row2{i} = sprintf('ROI %s', roiMatch{1}{1});
+                else
+                    row1{i} = '';
+                    row2{i} = varName;
+                end
+            else
+                % Individual: ROI1_T2 format
+                roiMatch = regexp(varName, 'ROI(\d+)_T(\d+)', 'tokens');
+                if ~isempty(roiMatch)
+                    row1{i} = roiMatch{1}{2};  % Trial number
+                    row2{i} = sprintf('ROI %s', roiMatch{1}{1});
+                else
+                    row1{i} = '';
+                    row2{i} = varName;
+                end
+            end
+        end
+    end
+    
+    % Write to Excel with custom headers
+    try
+        % Create data matrix
+        timeData = dataTable.Frame;
+        dataMatrix = [timeData, table2array(dataTable(:, 2:end))];
+        
+        % Create cell array for writing
+        cellData = cell(numFrames + 2, length(varNames));
+        cellData(1, :) = row1;
+        cellData(2, :) = row2;
+        
+        % Add data
+        for i = 1:numFrames
+            for j = 1:size(dataMatrix, 2)
+                cellData{i+2, j} = dataMatrix(i, j);
+            end
+        end
+        
+        % Write to Excel
+        writecell(cellData, filepath, 'Sheet', sheetName);
+        
+    catch ME
+        % Fallback to standard format
+        writetable(dataTable, filepath, 'Sheet', sheetName, 'WriteVariableNames', true);
     end
 end
 
@@ -951,17 +745,14 @@ function saveLogToFile(logBuffer, logFileName)
             return;
         end
         
-        % Write buffered output
         for i = 1:length(logBuffer)
             fprintf(fid, '%s\n', logBuffer{i});
         end
         
         fclose(fid);
-        fprintf('Log saved to: %s\n', logFileName);
         
     catch ME
         fprintf(2, 'Error writing log file: %s\n', ME.message);
-        
         if exist('fid', 'var') && fid ~= -1
             fclose(fid);
         end
@@ -969,7 +760,7 @@ function saveLogToFile(logBuffer, logFileName)
 end
 
 function [validHeaders, validColumns] = extractValidHeaders(headers)
-    % UPDATED: Extract valid headers from raw header row (minimal output)
+    % Extract valid headers from raw header row
     
     numHeaders = length(headers);
     validHeaders = cell(numHeaders, 1);
@@ -991,6 +782,4 @@ function [validHeaders, validColumns] = extractValidHeaders(headers)
     % Trim to actual size
     validHeaders = validHeaders(1:validCount);
     validColumns = validColumns(1:validCount);
-    
-    % MINIMAL OUTPUT: No detailed header extraction confirmation
 end
