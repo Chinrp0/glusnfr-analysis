@@ -353,14 +353,14 @@ end
 
 function [groupResults, groupTimes] = processAllGroups(groupedFiles, groupKeys, rawMeanFolder, ...
                                                       outputFolders, hasParallelToolbox, hasGPU, gpuInfo, modules)
-    % Process all groups with optimal parallelization
+    % Process all groups with group-level parallelization (not plot-level)
     
     numGroups = length(groupKeys);
     groupResults = cell(numGroups, 1);
     groupTimes = zeros(numGroups, 1);
     
-    % Determine processing strategy
-    useParallel = hasParallelToolbox && numGroups > 1;
+    % Determine if group-level parallel processing is beneficial
+    useParallel = shouldUseGroupParallel(numGroups, hasParallelToolbox);
     
     if useParallel
         fprintf('Processing %d groups in parallel\n', numGroups);
@@ -381,6 +381,33 @@ function [groupResults, groupTimes] = processAllGroups(groupedFiles, groupKeys, 
             [groupResults{groupIdx}, groupTimes(groupIdx)] = processGroup(...
                 groupIdx, groupKeys{groupIdx}, groupedFiles{groupIdx}, ...
                 rawMeanFolder, outputFolders, hasGPU, gpuInfo, modules);
+        end
+    end
+    
+    % Performance summary
+    totalTime = sum(groupTimes);
+    avgTime = totalTime / numGroups;
+    fprintf('Group processing complete: %.2fs total, %.2fs/group\n', totalTime, avgTime);
+end
+
+function useParallel = shouldUseGroupParallel(numGroups, hasParallelToolbox)
+    % Decide if group-level parallel processing is beneficial
+    
+    numCores = feature('numcores');
+    hasEnoughGroups = numGroups >= 3;  % Need at least 3 groups
+    hasEnoughCores = numCores >= 4;    % Need at least 4 cores
+    
+    useParallel = hasParallelToolbox && hasEnoughGroups && hasEnoughCores;
+    
+    if useParallel
+        fprintf('  → Group-level parallel: %d groups, %d cores\n', numGroups, numCores);
+    else
+        if ~hasParallelToolbox
+            fprintf('  → Sequential: No parallel toolbox\n');
+        elseif ~hasEnoughGroups
+            fprintf('  → Sequential: Only %d groups\n', numGroups);
+        else
+            fprintf('  → Sequential: Only %d cores\n', numCores);
         end
     end
 end

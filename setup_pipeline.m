@@ -8,7 +8,7 @@ function setup_pipeline()
     
     fprintf('\n');
     fprintf('===============================================\n');
-    fprintf('  GluSnFR Analysis Pipeline Setup v50\n');
+    fprintf('  GluSnFR Analysis Pipeline Setup \n');
     fprintf('===============================================\n');
     
     % Get the directory where this script is located (should be project root)
