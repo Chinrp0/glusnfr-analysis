@@ -288,9 +288,11 @@ function [rawMeanFolder, outputFolders, excelFiles, fileSystemLog] = setupFileSy
     fileSystemLog{end+1} = 'Creating output directories...';
     fprintf('Creating output directories...\n');
     
-    directories = {outputFolders.main, outputFolders.plots_main, outputFolders.roi_trials, 
+    % FIXED: Complete the directories array properly
+    directories = {outputFolders.main, outputFolders.plots_main, outputFolders.roi_trials, ...
                    outputFolders.roi_averages, outputFolders.coverslip_averages};
     
+    % Rest of function continues as before...
     for i = 1:length(directories)
         if ~exist(directories{i}, 'dir')
             mkdir(directories{i});
