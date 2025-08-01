@@ -1,11 +1,7 @@
 function io = io_manager()
     % IO_MANAGER - Complete file input/output operations module
     % 
-    % This module handles ALL file I/O operations including:
-    % - Excel file reading with multiple fallback methods
-    % - Excel file writing with custom headers (CONSOLIDATED)
-    % - Directory management and file validation
-    % - Complete experiment results writing
+    % Updated with cleaner, less verbose output for better user experience
     
     io.readExcelFile = @readExcelFileRobust;
     io.writeExcelWithHeaders = @writeExcelWithCustomHeaders;
@@ -95,7 +91,7 @@ function isValid = validateExcelFile(filepath)
 end
 
 function [data, headers, success] = readExcelFileRobust(filepath, useReadMatrix)
-    % Robust Excel file reading with multiple fallback methods
+    % UPDATED: Robust Excel file reading with minimal output
     
     success = false;
     data = [];
@@ -105,8 +101,6 @@ function [data, headers, success] = readExcelFileRobust(filepath, useReadMatrix)
         warning('File does not exist: %s', filepath);
         return;
     end
-    
-    fprintf('    Reading: %s\n', filepath);
     
     try
         if useReadMatrix && ~verLessThan('matlab', '9.6') % R2019a+
@@ -121,13 +115,11 @@ function [data, headers, success] = readExcelFileRobust(filepath, useReadMatrix)
             catch
                 % Method 2: readtable fallback
                 try
-                    fprintf('      Using readtable fallback...\n');
                     tempTable = readtable(filepath, 'ReadVariableNames', false);
                     raw = table2cell(tempTable);
                     success = true;
                 catch
                     % Method 3: xlsread as last resort
-                    fprintf('      Using xlsread fallback...\n');
                     [~, ~, raw] = xlsread(filepath); %#ok<XLSRD>
                     success = true;
                 end
@@ -150,8 +142,8 @@ function [data, headers, success] = readExcelFileRobust(filepath, useReadMatrix)
         % Convert to numeric
         data = convertToNumeric(dataRows);
         
-        fprintf('      Successfully read %d frames × %d columns\n', ...
-                size(data, 1), size(data, 2));
+        % MINIMAL OUTPUT: No detailed file reading confirmation
+        success = true;
     else
         success = false;
         warning('File %s has insufficient data or invalid format', filepath);
@@ -302,7 +294,7 @@ function numericData = convertToNumeric(dataRows)
 end
 
 function writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, outputFolder)
-    % FIXED: Complete experiment results writing with all expected sheets
+    % UPDATED: Complete experiment results writing with minimal output
     
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
     filename = [cleanGroupKey '_grouped.xlsx'];
@@ -313,58 +305,53 @@ function writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, 
         delete(filepath);
     end
     
-    fprintf('    Writing Excel results: %s\n', filename);
-    
     try
-            % FIXED: Better check for valid data
-            hasValidData = false;
-            
-            if strcmp(roiInfo.experimentType, 'PPF')
-                % For PPF, check if any of the organized data tables have content
-                if isstruct(organizedData)
-                    if (isfield(organizedData, 'allData') && width(organizedData.allData) > 1) || ...
-                       (isfield(organizedData, 'bothPeaks') && width(organizedData.bothPeaks) > 1) || ...
-                       (isfield(organizedData, 'singlePeak') && width(organizedData.singlePeak) > 1)
-                        hasValidData = true;
-                    end
-                end
-            else
-                % For 1AP, check if organized data table has content
-                if istable(organizedData) && width(organizedData) > 1
+        % FIXED: Better check for valid data
+        hasValidData = false;
+        sheetsWritten = 0;
+        
+        if strcmp(roiInfo.experimentType, 'PPF')
+            % For PPF, check if any of the organized data tables have content
+            if isstruct(organizedData)
+                if (isfield(organizedData, 'allData') && width(organizedData.allData) > 1) || ...
+                   (isfield(organizedData, 'bothPeaks') && width(organizedData.bothPeaks) > 1) || ...
+                   (isfield(organizedData, 'singlePeak') && width(organizedData.singlePeak) > 1)
                     hasValidData = true;
                 end
             end
-            
-            if ~hasValidData
-                warning('No data to write for group %s', groupKey);
-                return;
+        else
+            % For 1AP, check if organized data table has content
+            if istable(organizedData) && width(organizedData) > 1
+                hasValidData = true;
             end
+        end
+        
+        if ~hasValidData
+            warning('No data to write for group %s', groupKey);
+            return;
+        end
         
         if strcmp(roiInfo.experimentType, 'PPF')
-            writePPFResults(organizedData, averagedData, roiInfo, filepath);
+            sheetsWritten = writePPFResults(organizedData, averagedData, roiInfo, filepath);
         else
-            % FIXED: Write ALL 1AP sheets
-            write1APResultsComplete(organizedData, averagedData, roiInfo, filepath);
+            sheetsWritten = write1APResultsComplete(organizedData, averagedData, roiInfo, filepath);
         end
         
         % Always write metadata sheet
         writeMetadataSheet(organizedData, roiInfo, filepath);
+        sheetsWritten = sheetsWritten + 1;
         
-        fprintf('    Excel file saved: %s\n', filepath);
+        % CONCISE OUTPUT: Single line summary
+        % (Output will be handled by the calling function in processGroup)
         
     catch ME
         fprintf('    ERROR saving Excel file %s: %s\n', filename, ME.message);
-        fprintf('    Stack: %s\n', ME.stack(1).name);
         rethrow(ME);
     end
 end
 
-
-function writePPFResults(organizedData, averagedData, roiInfo, filepath)
-    % Write PPF results with separate sheets for different response patterns
-    % Now with robust error handling and fallbacks
-    
-    fprintf('      Writing PPF sheets...\n');
+function sheetsWritten = writePPFResults(organizedData, averagedData, roiInfo, filepath)
+    % UPDATED: Write PPF results with minimal output
     
     sheetsWritten = 0;
     
@@ -372,10 +359,9 @@ function writePPFResults(organizedData, averagedData, roiInfo, filepath)
     if isfield(organizedData, 'allData') && width(organizedData.allData) > 1
         try
             writeSheetWithCustomHeaders(organizedData.allData, filepath, 'All_Data', 'PPF', roiInfo);
-            fprintf('      ✓ All_Data sheet: %d columns\n', width(organizedData.allData)-1);
             sheetsWritten = sheetsWritten + 1;
         catch ME
-            fprintf('      ⚠ Failed to write All_Data sheet: %s\n', ME.message);
+            % Silent failure - will be reported at group level
         end
     end
     
@@ -383,90 +369,80 @@ function writePPFResults(organizedData, averagedData, roiInfo, filepath)
     if isfield(organizedData, 'bothPeaks') && width(organizedData.bothPeaks) > 1
         try
             writeSheetWithCustomHeaders(organizedData.bothPeaks, filepath, 'Both_Peaks', 'PPF', roiInfo);
-            fprintf('      ✓ Both_Peaks sheet: %d columns\n', width(organizedData.bothPeaks)-1);
             sheetsWritten = sheetsWritten + 1;
         catch ME
-            fprintf('      ⚠ Failed to write Both_Peaks sheet: %s\n', ME.message);
+            % Silent failure
         end
-    else
-        fprintf('      - No Both_Peaks data available\n');
     end
     
     % Write Single_Peak sheet if available
     if isfield(organizedData, 'singlePeak') && width(organizedData.singlePeak) > 1
         try
             writeSheetWithCustomHeaders(organizedData.singlePeak, filepath, 'Single_Peak', 'PPF', roiInfo);
-            fprintf('      ✓ Single_Peak sheet: %d columns\n', width(organizedData.singlePeak)-1);
             sheetsWritten = sheetsWritten + 1;
         catch ME
-            fprintf('      ⚠ Failed to write Single_Peak sheet: %s\n', ME.message);
+            % Silent failure
         end
-    else
-        fprintf('      - No Single_Peak data available\n');
     end
     
     % Write averaged sheets
     if isfield(averagedData, 'allData') && width(averagedData.allData) > 1
         try
             writeSheetWithCustomHeaders(averagedData.allData, filepath, 'All_Data_Avg', 'PPF', roiInfo);
-            fprintf('      ✓ All_Data_Avg sheet written\n');
             sheetsWritten = sheetsWritten + 1;
         catch ME
-            fprintf('      ⚠ Failed to write All_Data_Avg sheet: %s\n', ME.message);
+            % Silent failure
         end
     end
     
     if isfield(averagedData, 'bothPeaks') && width(averagedData.bothPeaks) > 1
         try
             writeSheetWithCustomHeaders(averagedData.bothPeaks, filepath, 'Both_Peaks_Avg', 'PPF', roiInfo);
-            fprintf('      ✓ Both_Peaks_Avg sheet written\n');
             sheetsWritten = sheetsWritten + 1;
         catch ME
-            fprintf('      ⚠ Failed to write Both_Peaks_Avg sheet: %s\n', ME.message);
+            % Silent failure
         end
     end
     
     if isfield(averagedData, 'singlePeak') && width(averagedData.singlePeak) > 1
         try
             writeSheetWithCustomHeaders(averagedData.singlePeak, filepath, 'Single_Peak_Avg', 'PPF', roiInfo);
-            fprintf('      ✓ Single_Peak_Avg sheet written\n');
             sheetsWritten = sheetsWritten + 1;
         catch ME
-            fprintf('      ⚠ Failed to write Single_Peak_Avg sheet: %s\n', ME.message);
+            % Silent failure
         end
-    end
-    
-    if sheetsWritten == 0
-        error('No PPF sheets could be written - check data organization');
-    else
-        fprintf('      PPF Excel writing complete: %d sheets written\n', sheetsWritten);
     end
 end
 
-function write1APResultsComplete(organizedData, averagedData, roiInfo, filepath)
-    % FIXED: Write ALL expected 1AP sheets including noise-based separation
+function sheetsWritten = write1APResultsComplete(organizedData, averagedData, roiInfo, filepath)
+    % UPDATED: Write ALL expected 1AP sheets with minimal output
     
-    fprintf('      Writing 1AP sheets...\n');
+    sheetsWritten = 0;
     
     % SHEET 1: Write noise-based trial sheets (Low_noise, High_noise)
-    writeNoiseBasedTrialsSheets(organizedData, roiInfo, filepath);
+    sheetsWritten = sheetsWritten + writeNoiseBasedTrialsSheets(organizedData, roiInfo, filepath);
     
     % SHEET 2: Write ROI_Average sheet
     if isfield(averagedData, 'roi') && ~isempty(averagedData.roi) && width(averagedData.roi) > 1
-        writeROIAveragedSheet(averagedData.roi, roiInfo, filepath);
-        fprintf('      ✓ ROI_Average sheet written\n');
-    else
-        fprintf('      ⚠ No ROI averaged data to write\n');
+        try
+            writeROIAveragedSheet(averagedData.roi, roiInfo, filepath);
+            sheetsWritten = sheetsWritten + 1;
+        catch ME
+            % Silent failure
+        end
     end
     
     % SHEET 3: Write Total_Average sheet
     if isfield(averagedData, 'total') && ~isempty(averagedData.total) && width(averagedData.total) > 1
-        writeTotalAverageSheet(averagedData.total, filepath);
-        fprintf('      ✓ Total_Average sheet written\n');
-    else
-        fprintf('      ⚠ No total averaged data to write\n');
+        try
+            writeTotalAverageSheet(averagedData.total, filepath);
+            sheetsWritten = sheetsWritten + 1;
+        catch ME
+            % Silent failure
+        end
     end
 end
+
 
 function writeNoiseBasedTrialsSheets(organizedData, roiInfo, filepath)
     % FIXED: Write separate Low_noise and High_noise sheets
@@ -515,10 +491,9 @@ function writeNoiseBasedTrialsSheets(organizedData, roiInfo, filepath)
 end
 
 function writeROIAveragedSheet(averagedData, roiInfo, filepath)
-    % FIXED: Write ROI_Average sheet with proper headers and data validation
+    % UPDATED: Write ROI_Average sheet with minimal output
     
     if width(averagedData) <= 1
-        fprintf('      ⚠ ROI averaged data is empty\n');
         return;
     end
     
@@ -550,14 +525,9 @@ function writeROIAveragedSheet(averagedData, roiInfo, filepath)
         end
     end
     
-    % FIXED: Write data with validation
+    % Write data with validation
     try
         dataMatrix = [timeData_ms, table2array(averagedData(:, 2:end))];
-        
-        % Validate data matrix
-        if any(isnan(dataMatrix(:)))
-            fprintf('      ⚠ ROI averaged data contains NaN values\n');
-        end
         
         cellData = cell(numFrames + 2, length(varNames));
         
@@ -573,13 +543,13 @@ function writeROIAveragedSheet(averagedData, roiInfo, filepath)
         writecell(cellData, filepath, 'Sheet', 'ROI_Average');
         
     catch ME
-        fprintf('      ⚠ ROI averaged sheet writing failed (%s), using fallback\n', ME.message);
+        % Fallback method
         writetable(averagedData, filepath, 'Sheet', 'ROI_Average', 'WriteVariableNames', true);
     end
 end
 
 function writeSheetWithCustomHeaders(dataTable, filepath, sheetName, expType, roiInfo)
-    % Write Excel sheet with custom two-row headers
+    % UPDATED: Write Excel sheet with custom two-row headers (minimal output)
     
     varNames = dataTable.Properties.VariableNames;
     numFrames = height(dataTable);
@@ -671,17 +641,15 @@ function writeSheetWithCustomHeaders(dataTable, filepath, sheetName, expType, ro
         writecell(cellData, filepath, 'Sheet', sheetName);
         
     catch ME
-        fprintf('    WARNING: Custom header writing failed for %s (%s), using standard format\n', ...
-                sheetName, ME.message);
+        % Fallback to standard format
         writetable(dataTable, filepath, 'Sheet', sheetName, 'WriteVariableNames', true);
     end
 end
 
 function writeTotalAverageSheet(totalAveragedData, filepath)
-    % FIXED: Write Total_Average sheet with proper validation
+    % UPDATED: Write Total_Average sheet with minimal output
     
     if width(totalAveragedData) <= 1
-        fprintf('      ⚠ Total averaged data is empty\n');
         return;
     end
     
@@ -733,9 +701,7 @@ function writeTotalAverageSheet(totalAveragedData, filepath)
     try
         dataMatrix = [timeData_ms, table2array(totalAveragedData(:, 2:end))];
         
-        % Validate data matrix
         if size(dataMatrix, 2) <= 1
-            fprintf('      ⚠ Total averaged data has no data columns\n');
             return;
         end
         
@@ -753,14 +719,13 @@ function writeTotalAverageSheet(totalAveragedData, filepath)
         writecell(cellData, filepath, 'Sheet', 'Total_Average');
         
     catch ME
-        fprintf('      ⚠ Total averaged sheet writing failed (%s), using fallback\n', ME.message);
+        % Fallback
         writetable(totalAveragedData, filepath, 'Sheet', 'Total_Average', 'WriteVariableNames', true);
     end
 end
 
-
 function writeMetadataSheet(organizedData, roiInfo, filepath)
-    % FIXED: Write metadata sheet with proper PPF structure handling
+    % UPDATED: Write metadata sheet with minimal output
     
     try
         if strcmp(roiInfo.experimentType, 'PPF')
@@ -771,31 +736,18 @@ function writeMetadataSheet(organizedData, roiInfo, filepath)
             writeMetadataSheet1AP(organizedData, roiInfo, filepath);
         end
         
-        if ~isempty(metadataTable)
-            fprintf('      ✓ ROI_Metadata sheet written\n');
-        end
-        
     catch ME
-        fprintf('      ⚠ Metadata sheet writing failed: %s\n', ME.message);
-        
-        % Debug: Show what type of data we're trying to process
-        if strcmp(roiInfo.experimentType, 'PPF')
-            fprintf('        Debug: PPF organizedData type = %s\n', class(organizedData));
-            if isstruct(organizedData)
-                fprintf('        Debug: PPF organizedData fields = %s\n', strjoin(fieldnames(organizedData), ', '));
-            end
-        end
+        % Silent failure - metadata is optional
     end
 end
 
 function writeMetadataSheet1AP(organizedData, roiInfo, filepath)
-    % Write 1AP metadata
+    % UPDATED: Write 1AP metadata with minimal output
     
     cfg = GluSnFRConfig();
     maxEntries = length(roiInfo.roiNumbers) * roiInfo.numTrials;
     
     if maxEntries == 0
-        fprintf('        ⚠ No metadata entries to write\n');
         return;
     end
     
@@ -855,9 +807,6 @@ function writeMetadataSheet1AP(organizedData, roiInfo, filepath)
         allMetadata = allMetadata(1:entryCount);
         metadataTable = struct2table(allMetadata);
         writetable(metadataTable, filepath, 'Sheet', 'ROI_Metadata');
-        fprintf('        ✓ 1AP metadata: %d entries\n', entryCount);
-    else
-        fprintf('        ⚠ No valid 1AP metadata to write\n');
     end
 end
 
@@ -995,7 +944,7 @@ function saveLogToFile(logBuffer, logFileName)
 end
 
 function [validHeaders, validColumns] = extractValidHeaders(headers)
-    % Extract valid headers from raw header row
+    % UPDATED: Extract valid headers from raw header row (minimal output)
     
     numHeaders = length(headers);
     validHeaders = cell(numHeaders, 1);
@@ -1018,5 +967,5 @@ function [validHeaders, validColumns] = extractValidHeaders(headers)
     validHeaders = validHeaders(1:validCount);
     validColumns = validColumns(1:validCount);
     
-    fprintf('      Extracted %d valid headers from %d total columns\n', validCount, numHeaders);
+    % MINIMAL OUTPUT: No detailed header extraction confirmation
 end

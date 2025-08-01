@@ -1,11 +1,7 @@
 function organizer = data_organizer()
     % DATA_ORGANIZER - Data organization and averaging module
     % 
-    % This module handles the complex data organization logic:
-    % - Grouping files by experiment parameters
-    % - Organizing individual trial data
-    % - Creating averaged data structures
-    % - Handling both 1AP and PPF experiments
+    % Updated with cleaner, less verbose output for better user experience
     
     organizer.organizeFilesByGroup = @organizeFilesByGroup;
     organizer.organizeGroupData = @organizeGroupData;
@@ -66,7 +62,7 @@ function [groupedFiles, groupKeys] = organizeFilesByGroup(excelFiles, rawMeanFol
 end
 
 function [organizedData, averagedData, roiInfo] = organizeGroupData(groupData, groupMetadata, groupKey)
-    % Organize group data based on experiment type
+    % UPDATED: Organize group data with minimal output
     
     cfg = GluSnFRConfig();
     
@@ -74,17 +70,14 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData(groupData, g
     isPPF = contains(groupKey, 'PPF_');
     
     if isPPF
-        fprintf('    Organizing PPF experiment data\n');
         [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData, groupMetadata, groupKey, cfg);
     else
-        fprintf('    Organizing 1AP experiment data\n');
         [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData, groupMetadata, cfg);
     end
 end
 
-
 function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData, groupMetadata, groupKey, cfg)
-    % PPF-specific data organization with peak response separation and robust fallback
+    % UPDATED: PPF-specific data organization with minimal output
     
     % Extract timepoint from group key
     timepointMatch = regexp(groupKey, 'PPF_(\d+)ms', 'tokens');
@@ -123,7 +116,7 @@ function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData
             coverslipFiles(fileCount).thresholds = groupData{i}.thresholds;
             coverslipFiles(fileCount).timeData_ms = groupData{i}.timeData_ms;
             
-            % Store peak response information if available (NEW - with fallback)
+            % Store peak response information if available (with fallback)
             if isfield(groupData{i}, 'filterStats') && ...
                isfield(groupData{i}.filterStats, 'peakResponses') && ...
                ~isempty(groupData{i}.filterStats.peakResponses)
@@ -240,10 +233,8 @@ function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData
     roiInfo.experimentType = 'PPF';
     roiInfo.dataType = 'separated';
     
-    fprintf('    PPF organization complete: %d total ROIs, %d both peaks, %d single peak\n', ...
-            width(allDataTable)-1, ...
-            ternary(isfield(organizedData, 'bothPeaks'), width(organizedData.bothPeaks)-1, 0), ...
-            ternary(isfield(organizedData, 'singlePeak'), width(organizedData.singlePeak)-1, 0));
+    % MINIMAL OUTPUT: Single line summary
+    % (will be shown in group processing summary)
 end
 
 function averagedTable = createPPFAveragedData(dataTable, coverslipFiles)
@@ -295,9 +286,7 @@ function result = ternary(condition, trueVal, falseVal)
 end
 
 function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData, groupMetadata, cfg)
-    % FIXED: 1AP-specific data organization with simplified noise handling
-    
-    fprintf('    Collecting ROI information from %d files...\n', length(groupData));
+    % UPDATED: 1AP-specific data organization with minimal output
     
     % Extract trial numbers
     [originalTrialNumbers, trialMapping] = createTrialMapping(groupMetadata);
@@ -314,23 +303,12 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData
         fileData = groupData{fileIdx};
         
         if isempty(fileData) || ~isfield(fileData, 'roiNames') || isempty(fileData.roiNames)
-            fprintf('      File %d: No valid ROI data\n', fileIdx);
             continue;
         end
         
-        fprintf('      File %d: Extracting from %d ROI names\n', fileIdx, length(fileData.roiNames));
-        
-        % Debug: Show first few ROI names
-        if length(fileData.roiNames) >= 3
-            fprintf('        Sample ROI names: "%s", "%s", "%s"\n', ...
-                    char(fileData.roiNames{1}), char(fileData.roiNames{2}), char(fileData.roiNames{3}));
-        end
-        
         roiNums = utils.extractROINumbers(fileData.roiNames);
-        fprintf('      File %d: %d ROIs found\n', fileIdx, length(roiNums));
         
         if isempty(roiNums)
-            fprintf('      File %d: WARNING - No ROI numbers extracted!\n', fileIdx);
             continue;
         end
         
@@ -357,8 +335,6 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData
     
     uniqueROIs = unique(allUniqueROIs);
     uniqueROIs = sort(uniqueROIs);
-    
-    fprintf('    Total unique ROIs found: %d\n', length(uniqueROIs));
     
     % Create noise classification map (SIMPLIFIED)
     roiNoiseMap = containers.Map('KeyType', 'double', 'ValueType', 'char');
@@ -401,8 +377,6 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData
     
     % Create data columns
     allThresholds = NaN(length(uniqueROIs), numTrials);
-    
-    fprintf('    Organizing %d ROIs across %d trials\n', length(uniqueROIs), numTrials);
     
     for roiIdx = 1:length(uniqueROIs)
         roiNum = uniqueROIs(roiIdx);
@@ -459,7 +433,8 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData
     averagedData.roi = roiAveragedData;
     averagedData.total = totalAveragedData;
     
-    fprintf('    Organization complete: %d columns in organized data\n', width(organizedData)-1);
+    % MINIMAL OUTPUT: No detailed organization logging
+    % (will be shown in group processing summary)
 end
 
 function [originalTrialNumbers, trialMapping] = createTrialMapping(groupMetadata)

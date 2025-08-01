@@ -1,8 +1,7 @@
 function plot = plot_generator()
     % PLOT_GENERATOR - Main entry point for plotting system
     % 
-    % This wrapper function chooses between parallel and legacy plotting
-    % based on system capabilities
+    % Updated with minimal output for cleaner user experience
     
     try
         % Try to use parallel version if workers are available
@@ -20,12 +19,7 @@ end
 function plot = plot_generator_parallel()
     % PLOT_GENERATOR_PARALLEL - Optimized plotting with parallel generation
     % 
-    % Major improvements:
-    % - Parallel plot generation for independent figures
-    % - Pre-computed layouts and colors
-    % - Vectorized data preparation
-    % - Background plotting using parfeval
-    % - Memory-efficient plot creation
+    % Updated with minimal output
     
     plot.generateGroupPlots = @generateGroupPlotsParallel;
     plot.generatePlotsBackground = @generatePlotsInBackground;
@@ -34,14 +28,11 @@ function plot = plot_generator_parallel()
 end
 
 function generateGroupPlotsParallel(organizedData, averagedData, roiInfo, groupKey, outputFolders)
-    % OPTIMIZED: Parallel plot generation with background processing
-    
-    fprintf('    Generating plots for group: %s (parallel mode)\n', groupKey);
+    % UPDATED: Parallel plot generation with minimal output
     
     % Pre-validate data structure
     hasData = validatePlotData(organizedData, roiInfo);
     if ~hasData
-        fprintf('    No valid data for plotting group %s\n', groupKey);
         return;
     end
     
@@ -49,7 +40,6 @@ function generateGroupPlotsParallel(organizedData, averagedData, roiInfo, groupK
     plotTasks = identifyPlotTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders);
     
     if isempty(plotTasks)
-        fprintf('    No plot tasks identified for group %s\n', groupKey);
         return;
     end
     
@@ -67,7 +57,6 @@ function plotTasks = identifyPlotTasks(organizedData, averagedData, roiInfo, gro
     % Identify independent plotting tasks that can run in parallel
     
     plotTasks = {};
-    taskCount = 0;
     
     if strcmp(roiInfo.experimentType, 'PPF')
         % PPF plotting tasks
@@ -180,10 +169,9 @@ function plotTasks = identifyPPFPlotTasks(organizedData, averagedData, roiInfo, 
 end
 
 function generatePlotsParallel(plotTasks)
-    % Generate plots in parallel using parfeval
+    % Generate plots in parallel using parfeval (minimal output)
     
     numTasks = length(plotTasks);
-    fprintf('      Generating %d plot tasks in parallel\n', numTasks);
     
     % Sort tasks by priority (higher priority first)
     priorities = cellfun(@(x) x.priority, plotTasks);
@@ -209,11 +197,11 @@ function generatePlotsParallel(plotTasks)
                 plotsGenerated = plotsGenerated + 1;
             end
         catch ME
-            fprintf('      Plot task %d failed: %s\n', i, ME.message);
+            % Silent failure for individual plot tasks
         end
     end
     
-    fprintf('    Generated %d/%d plots successfully (parallel)\n', plotsGenerated, numTasks);
+    % Summary output handled by calling function
 end
 
 function generatePlotsSequential(plotTasks)
@@ -263,7 +251,7 @@ function success = executePlotTask(task)
 end
 
 function success = generate1APTrialsOptimized(task)
-    % OPTIMIZED: 1AP trials plotting with vectorized operations
+    % UPDATED: 1AP trials plotting with minimal output
     
     success = false;
     cfg = GluSnFRConfig();
@@ -318,7 +306,6 @@ function success = generate1APTrialsOptimized(task)
             success = true;
             
         catch ME
-            fprintf('Error creating trials plot %d: %s\n', figNum, ME.message);
             if exist('fig', 'var') && isvalid(fig)
                 close(fig);
             end
@@ -327,7 +314,7 @@ function success = generate1APTrialsOptimized(task)
 end
 
 function plotData = precomputePlotDataVectorized(organizedData, roiInfo, cfg)
-    % OPTIMIZED: Pre-compute all plot data using vectorized operations
+    % UPDATED: Pre-compute all plot data using vectorized operations (minimal output)
     
     plotData = struct();
     plotData.validROIs = [];
@@ -499,47 +486,17 @@ function success = generatePPFAveragedOptimized(task, plotType)
 end
 
 function plot = plot_generator_legacy()
-    % PLOT_GENERATOR - Updated plotting module with fixed ROI numbering
-    % 
-    % Changes:
-    % - Updated folder structure (single plot folder with 3 subfolders)
-    % - Fixed ROI numbering to show original ROI numbers
-    % - More vectorized plotting operations
+    % PLOT_GENERATOR - Updated plotting module with minimal output
     
     plot.generateGroupPlots = @generateGroupPlots;
     plot.generate1APPlots = @generate1APPlots;
     plot.generatePPFPlots = @generatePPFPlots;
-    plot.generateCoverslipAveragePlots = @generateCoverslipAveragePlots; % Renamed
+    plot.generateCoverslipAveragePlots = @generateCoverslipAveragePlots;
     plot.calculateLayout = @calculateOptimalLayout;
 end
 
 function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outputFolders)
-    % UPDATED: Main plotting dispatcher with enhanced debugging
-    
-    fprintf('    Generating plots for group: %s\n', groupKey);
-    
-    % Debug: Show data structure
-    fprintf('      Data structure check:\n');
-    if strcmp(roiInfo.experimentType, 'PPF')
-        fprintf('        Experiment type: PPF\n');
-        if isstruct(organizedData)
-            fprintf('        organizedData is struct with fields: %s\n', strjoin(fieldnames(organizedData), ', '));
-            if isfield(organizedData, 'allData')
-                fprintf('        allData: %s, width=%d\n', class(organizedData.allData), width(organizedData.allData));
-            end
-            if isfield(organizedData, 'bothPeaks')
-                fprintf('        bothPeaks: %s, width=%d\n', class(organizedData.bothPeaks), width(organizedData.bothPeaks));
-            end
-            if isfield(organizedData, 'singlePeak')
-                fprintf('        singlePeak: %s, width=%d\n', class(organizedData.singlePeak), width(organizedData.singlePeak));
-            end
-        else
-            fprintf('        organizedData is %s\n', class(organizedData));
-        end
-    else
-        fprintf('        Experiment type: %s\n', roiInfo.experimentType);
-        fprintf('        organizedData: %s, width=%d\n', class(organizedData), width(organizedData));
-    end
+    % UPDATED: Main plotting dispatcher with minimal output
     
     % Check if we have data to plot
     hasData = false;
@@ -561,11 +518,8 @@ function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outp
     end
     
     if ~hasData
-        fprintf('    No valid data structure found for plotting group %s\n', groupKey);
         return;
     end
-    
-    fprintf('      ✓ Valid data found, proceeding with plotting\n');
     
     if strcmp(roiInfo.experimentType, 'PPF')
         generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, outputFolders);
@@ -574,21 +528,17 @@ function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outp
         if isfield(averagedData, 'roi') && ~isempty(averagedData.roi)
             generate1APPlots(organizedData, averagedData.roi, roiInfo, groupKey, ...
                            outputFolders.roi_trials, outputFolders.roi_averages);
-        else
-            fprintf('    No ROI averaged data for plotting\n');
         end
         
         if isfield(averagedData, 'total') && ~isempty(averagedData.total)
             generateCoverslipAveragePlots(averagedData.total, roiInfo, groupKey, ...
                                         outputFolders.coverslip_averages);
-        else
-            fprintf('    No total averaged data for plotting\n');
         end
     end
 end
 
 function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, roiTrialsFolder, roiAveragesFolder)
-    % FIXED: 1AP plotting with correct original ROI numbers and better vectorization
+    % UPDATED: 1AP plotting with minimal output
     
     cfg = GluSnFRConfig();
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
@@ -597,12 +547,8 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, roiTri
     
     % Check if we have ROIs to plot
     if isempty(roiInfo.roiNumbers)
-        fprintf('    No ROIs available for plotting\n');
         return;
     end
-    
-    fprintf('    Generating 1AP plots for %d ROIs (original numbers: %d-%d)\n', ...
-            length(roiInfo.roiNumbers), min(roiInfo.roiNumbers), max(roiInfo.roiNumbers));
     
     % VECTORIZED: Pre-calculate all colors and properties
     trialColors = [
@@ -627,11 +573,10 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, roiTri
     uniqueTrials = sort(uniqueTrials);
     
     if isempty(uniqueTrials)
-        fprintf('    No valid trials found for plotting\n');
         return;
     end
     
-    % FIXED: Generate individual trials plots with correct ROI numbers
+    % Generate individual trials plots
     numTrialsFigures = ceil(numROIs / maxPlotsPerFigure);
     plotsGenerated = 0;
     
@@ -650,10 +595,10 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, roiTri
             legendLabels = {};
             hasData = false;
             
-            % FIXED: Iterate through ROI indices, but use original ROI numbers
+            % Iterate through ROI indices, but use original ROI numbers
             for roiArrayIdx = startIdx:endIdx
                 subplotIdx = roiArrayIdx - startIdx + 1;
-                originalROI = roiInfo.roiNumbers(roiArrayIdx); % FIXED: Get original ROI number
+                originalROI = roiInfo.roiNumbers(roiArrayIdx);
                 
                 subplot(nRows, nCols, subplotIdx);
                 hold on;
@@ -664,7 +609,7 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, roiTri
                 
                 for i = 1:length(uniqueTrials)
                     trialNum = uniqueTrials(i);
-                    colName = sprintf('ROI%d_T%g', originalROI, trialNum); % Use original ROI number
+                    colName = sprintf('ROI%d_T%g', originalROI, trialNum);
                     
                     if ismember(colName, organizedData.Properties.VariableNames)
                         trialData = organizedData.(colName);
@@ -714,7 +659,7 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, roiTri
                     legendLabels{end+1} = 'Stimulus';
                 end
                 
-                % FIXED: Title shows original ROI number
+                % Title shows original ROI number
                 title(sprintf('ROI %d (n=%d)', originalROI, trialCount), 'FontSize', 10, 'FontWeight', 'bold');
                 xlabel('Time (ms)', 'FontSize', 8);
                 ylabel('ΔF/F', 'FontSize', 8);
@@ -746,7 +691,6 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, roiTri
             close(fig);
             
         catch ME
-            fprintf('    ERROR creating trials plot %d: %s\n', figNum, ME.message);
             if exist('fig', 'var'), close(fig); end
         end
     end
@@ -757,18 +701,15 @@ function generate1APPlots(organizedData, averagedData, roiInfo, groupKey, roiTri
                                                      roiAveragesFolder, timeData_ms, stimulusTime_ms, cfg);
         plotsGenerated = plotsGenerated + avgPlotsGenerated;
     end
-    
-    fprintf('    Generated %d plot files total\n', plotsGenerated);
 end
 
 
 function numGenerated = generateAveragedROIPlots(averagedData, roiInfo, cleanGroupKey, plotsFolder, timeData_ms, stimulusTime_ms, cfg)
-    % FIXED: Generate averaged plots with correct original ROI numbers
+    % UPDATED: Generate averaged plots with minimal output
     
     numGenerated = 0;
     
     if width(averagedData) <= 1
-        fprintf('      No averaged data to plot\n');
         return;
     end
     
@@ -825,10 +766,10 @@ function numGenerated = generateAveragedROIPlots(averagedData, roiInfo, cleanGro
                     end
                 end
                 
-                % FIXED: Parse title to show original ROI number (should already be correct)
+                % Parse title to show original ROI number
                 roiMatch = regexp(varName, 'ROI(\d+)_n(\d+)', 'tokens');
                 if ~isempty(roiMatch)
-                    originalROI = str2double(roiMatch{1}{1}); % This should be the original ROI number
+                    originalROI = str2double(roiMatch{1}{1});
                     title(sprintf('ROI %d (n=%s)', originalROI, roiMatch{1}{2}), 'FontSize', 10, 'FontWeight', 'bold');
                 else
                     title(varName, 'FontSize', 10);
@@ -874,17 +815,15 @@ function numGenerated = generateAveragedROIPlots(averagedData, roiInfo, cleanGro
             close(figAvg);
             
         catch ME
-            fprintf('    ERROR creating averaged figure %d: %s\n', figNum, ME.message);
             if exist('figAvg', 'var'), close(figAvg); end
         end
     end
 end
 
 function generateCoverslipAveragePlots(totalAveragedData, roiInfo, groupKey, plotsFolder)
-    % RENAMED: Generate plots for coverslip averages (was total averages)
+    % UPDATED: Generate plots for coverslip averages with minimal output
     
     if width(totalAveragedData) <= 1
-        fprintf('    No coverslip averaged data to plot\n');
         return;
     end
     
@@ -964,28 +903,23 @@ function generateCoverslipAveragePlots(totalAveragedData, roiInfo, groupKey, plo
             
             plotFile = sprintf('%s_coverslip_averages.png', cleanGroupKey);
             print(fig, fullfile(plotsFolder, plotFile), '-dpng', sprintf('-r%d', cfg.plotting.DPI));
-            
-            fprintf('    ✓ Generated coverslip averages plot: %s\n', plotFile);
         end
         
         close(fig);
         
     catch ME
-        fprintf('    ERROR creating coverslip averages plot: %s\n', ME.message);
         if exist('fig', 'var'), close(fig); end
     end
 end
 
 function generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, outputFolders)
-    % FIXED: PPF plotting with correct folder assignment and limited averaged plots
+    % UPDATED: PPF plotting with minimal output
     
     cfg = GluSnFRConfig();
     cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
     
     % Extract genotype for color coding
     genotype = extractGenotypeFromGroupKey(groupKey);
-    
-    fprintf('    Generating PPF plots for %s, timepoint=%dms\n', genotype, roiInfo.timepoint);
     
     % Determine which data to use for plotting
     plotData = [];
@@ -994,19 +928,15 @@ function generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, output
     if isstruct(organizedData)
         if isfield(organizedData, 'allData') && istable(organizedData.allData) && width(organizedData.allData) > 1
             plotData = organizedData.allData;
-            fprintf('      Using allData for individual plots (%d ROIs)\n', width(plotData)-1);
         elseif isfield(organizedData, 'bothPeaks') && istable(organizedData.bothPeaks) && width(organizedData.bothPeaks) > 1
             plotData = organizedData.bothPeaks;
-            fprintf('      Using bothPeaks for individual plots (%d ROIs)\n', width(plotData)-1);
         elseif isfield(organizedData, 'singlePeak') && istable(organizedData.singlePeak) && width(organizedData.singlePeak) > 1
             plotData = organizedData.singlePeak;
-            fprintf('      Using singlePeak for individual plots (%d ROIs)\n', width(plotData)-1);
         end
     end
     
     % Check if we have data to plot
     if isempty(plotData) || ~istable(plotData)
-        fprintf('    No valid PPF individual data for plotting\n');
         return;
     end
     
@@ -1016,11 +946,7 @@ function generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, output
         stimulusTime_ms1 = cfg.timing.STIMULUS_TIME_MS;
         stimulusTime_ms2 = stimulusTime_ms1 + roiInfo.timepoint;
         
-        fprintf('      PPF timing: Stim1=%dms, Stim2=%dms (interval=%dms)\n', ...
-                stimulusTime_ms1, stimulusTime_ms2, roiInfo.timepoint);
-        
     catch ME
-        fprintf('    Error extracting time data: %s\n', ME.message);
         return;
     end
     
@@ -1028,9 +954,8 @@ function generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, output
     try
         generatePPFIndividualPlots(plotData, roiInfo, genotype, outputFolders.roi_trials, ...
                                   timeData_ms, stimulusTime_ms1, stimulusTime_ms2, cfg);
-        fprintf('      ✓ Individual PPF plots generated\n');
     catch ME
-        fprintf('      ⚠ Individual PPF plots failed: %s\n', ME.message);
+        % Silent failure
     end
     
     % Generate ONLY allData and bothPeaks averaged plots (to Coverslip_Averages folder)
@@ -1041,9 +966,8 @@ function generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, output
                 generatePPFAveragedPlots(averagedData.allData, roiInfo, cleanGroupKey, genotype, ...
                                         outputFolders.coverslip_averages, timeData_ms, ...
                                         stimulusTime_ms1, stimulusTime_ms2, cfg, 'AllData');
-                fprintf('      ✓ All Data averaged plots generated\n');
             catch ME
-                fprintf('      ⚠ All Data averaged plots failed: %s\n', ME.message);
+                % Silent failure
             end
         end
         
@@ -1053,20 +977,12 @@ function generatePPFPlots(organizedData, averagedData, roiInfo, groupKey, output
                 generatePPFAveragedPlots(averagedData.bothPeaks, roiInfo, cleanGroupKey, genotype, ...
                                         outputFolders.coverslip_averages, timeData_ms, ...
                                         stimulusTime_ms1, stimulusTime_ms2, cfg, 'BothPeaks');
-                fprintf('      ✓ Both Peaks averaged plots generated\n');
             catch ME
-                fprintf('      ⚠ Both Peaks averaged plots failed: %s\n', ME.message);
+                % Silent failure
             end
         end
-        
-        % Note: No single peak averaged plots as requested
-    else
-        fprintf('      - No averaged data available for plotting\n');
     end
-    
-    fprintf('    PPF plots complete for genotype %s\n', genotype);
 end
-
 function generatePPFIndividualPlots(organizedData, roiInfo, genotype, plotsFolder, timeData_ms, stimulusTime_ms1, stimulusTime_ms2, cfg)
     % Generate individual PPF plots by coverslip with red coloring for single peak traces
     

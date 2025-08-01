@@ -1,8 +1,7 @@
 function filter = roi_filter()
     % ROI_FILTER - Enhanced with simple signal quality filtering
     % 
-    % Now includes simple enhanced filtering to remove noise like ROI 19
-    % while keeping real signals like ROI 29 & 32
+    % Updated with minimal output for cleaner user experience
     
     filter.filterROIs = @filterROIsMain;
     filter.filterROIsOriginal = @filterROIsOriginal;
@@ -12,25 +11,18 @@ function filter = roi_filter()
 end
 
 function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsMain(dF_values, headers, thresholds, experimentType, varargin)
-    % Main filtering function - chooses between original and enhanced
+    % UPDATED: Main filtering function with minimal output
     
     cfg = GluSnFRConfig();
     
     % Check if enhanced filtering is enabled
     if isfield(cfg.filtering, 'ENABLE_ENHANCED_FILTERING') && cfg.filtering.ENABLE_ENHANCED_FILTERING
-        if cfg.debug.VERBOSE_FILTERING
-            fprintf('    Using simple enhanced filtering\n');
-        end
-        
         try
             [filteredData, filteredHeaders, filteredThresholds, stats] = ...
                 filterROIsEnhanced(dF_values, headers, thresholds, experimentType, varargin{:});
             stats.filtering_method = 'enhanced';
             
         catch ME
-            if cfg.debug.VERBOSE_FILTERING
-                fprintf('    Enhanced filtering failed (%s), using original\n', ME.message);
-            end
             [filteredData, filteredHeaders, filteredThresholds, stats] = ...
                 filterROIsOriginal(dF_values, headers, thresholds, experimentType, varargin{:});
             stats.filtering_method = 'original_fallback';
@@ -45,7 +37,7 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
 end
 
 function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsEnhanced(dF_values, headers, thresholds, experimentType, varargin)
-    % SIMPLIFIED enhanced filtering - 3 simple criteria to remove noise
+    % UPDATED: SIMPLIFIED enhanced filtering with minimal output
     
     cfg = GluSnFRConfig();
     
@@ -54,10 +46,6 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     timepoint_ms = [];
     if isPPF && ~isempty(varargin)
         timepoint_ms = varargin{1};
-    end
-    
-    if cfg.debug.VERBOSE_FILTERING
-        fprintf('    Enhanced filtering: 3 simple criteria to remove noise\n');
     end
     
     % STEP 1: Start with original filtering
@@ -91,7 +79,6 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
         trace = basicData(:, roi);
         
         % CRITERION 1: Signal-to-Noise Ratio
-        % Real signals should have clear peaks above noise
         baselineNoise = std(trace(baselineWindow), 'omitnan');
         if isempty(postStimWindow)
             peakValue = 0;
@@ -110,7 +97,6 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
         if snr_pass, criteria_stats.snr_passed = criteria_stats.snr_passed + 1; end
         
         % CRITERION 2: Peak Timing
-        % Real signals should peak within reasonable time after stimulus
         if ~isempty(postStimWindow)
             [~, peakIdx] = max(trace(postStimWindow));
             peakFrame = postStimWindow(peakIdx);
@@ -124,7 +110,6 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
         if timing_pass, criteria_stats.timing_passed = criteria_stats.timing_passed + 1; end
         
         % CRITERION 3: Peak Prominence
-        % Real signals should have peaks that clearly stand out
         if ~isempty(postStimWindow)
             baseline_mean = mean(trace(baselineWindow), 'omitnan');
             peak_prominence = peakValue - baseline_mean;
@@ -151,9 +136,6 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
         filteredData = basicData;
         filteredHeaders = basicHeaders;
         filteredThresholds = basicThresholds;
-        if cfg.debug.VERBOSE_FILTERING
-            fprintf('    WARNING: Enhanced filter removed all ROIs, using basic\n');
-        end
     end
     
     % Generate enhanced stats
@@ -164,19 +146,11 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     stats.additional_removed = n_rois - sum(enhancedMask);
     stats.criteria_stats = criteria_stats;
     
-    if cfg.debug.VERBOSE_FILTERING
-        fprintf('    Enhanced: %d→%d ROIs (SNR:%d, Timing:%d, Prominence:%d)\n', ...
-                n_rois, stats.enhanced_passed, ...
-                criteria_stats.snr_passed, criteria_stats.timing_passed, criteria_stats.prominence_passed);
-    end
+    % MINIMAL OUTPUT: No detailed enhancement logging
 end
 
-%% ========================================================================
-%% ORIGINAL FILTERING METHOD (unchanged)
-%% ========================================================================
-
 function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsOriginal(dF_values, headers, thresholds, experimentType, varargin)
-    % ORIGINAL: Your existing working method (unchanged)
+    % UPDATED: ORIGINAL filtering method with minimal output
     
     cfg = GluSnFRConfig();
     
@@ -187,9 +161,7 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
         timepoint_ms = varargin{1};
     end
     
-    if cfg.debug.VERBOSE_FILTERING
-        fprintf('    Filtering ROIs: %s experiment (original method)\n', experimentType);
-    end
+    % MINIMAL OUTPUT: No detailed filtering steps
     
     % More lenient initial cleanup
     [dF_values, headers, thresholds] = removeEmptyROIs(dF_values, headers, thresholds, cfg);
@@ -226,14 +198,11 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
         stats.peakResponses.filteredPeak2Only = peakResponses.peak2Only(responseFilter);
     end
     
-    if cfg.debug.VERBOSE_FILTERING
-        fprintf('    Original filtering complete: %d/%d ROIs passed (%s)\n', ...
-                length(filteredHeaders), length(headers), experimentType);
-    end
+    % MINIMAL OUTPUT: No detailed completion message
 end
 
 function [adaptiveThresholds, noiseClassification] = calculateAdaptiveThresholds(baseThresholds, cfg)
-    % Use configuration parameters instead of hardcoded values
+    % Use configuration parameters instead of hardcoded values (minimal output)
     
     lowNoiseROIs = baseThresholds <= cfg.thresholds.LOW_NOISE_CUTOFF;
     
@@ -243,14 +212,11 @@ function [adaptiveThresholds, noiseClassification] = calculateAdaptiveThresholds
     noiseClassification = repmat({'high'}, size(baseThresholds));
     noiseClassification(lowNoiseROIs) = {'low'};
     
-    if cfg.debug.VERBOSE_FILTERING
-        fprintf('    Adaptive thresholds: %d low noise, %d high noise ROIs (multiplier=%.1fx)\n', ...
-                sum(lowNoiseROIs), sum(~lowNoiseROIs), cfg.thresholds.HIGH_NOISE_MULTIPLIER);
-    end
+    % MINIMAL OUTPUT: No adaptive threshold logging
 end
 
 function responseFilter = apply1APFiltering(dF_values, thresholds, cfg)
-    % Use configurable threshold percentage from config
+    % UPDATED: Use configurable threshold percentage with minimal output
     
     stimulusFrame = cfg.timing.STIMULUS_FRAME;
     postWindow = cfg.timing.POST_STIMULUS_WINDOW;
@@ -265,15 +231,11 @@ function responseFilter = apply1APFiltering(dF_values, thresholds, cfg)
         responseFilter = responseFilter & amplitudeFilter;
     end
     
-    if cfg.debug.VERBOSE_FILTERING
-        fprintf('    1AP filtering: %d/%d ROIs passed threshold (%.0f%% of threshold used)\n', ...
-                sum(responseFilter), length(responseFilter), thresholdPercentage*100);
-    end
+    % MINIMAL OUTPUT: No detailed 1AP filtering logging
 end
 
 function [responseFilter, peakResponses] = applyPPFFiltering(dF_values, thresholds, timepoint_ms, cfg)
-    % Use configurable threshold percentage from config
-    % Now also returns peak response information
+    % UPDATED: Use configurable threshold percentage with minimal output
     
     stimulusFrame1 = cfg.timing.STIMULUS_FRAME;
     stimulusFrame2 = stimulusFrame1 + round(timepoint_ms / cfg.timing.MS_PER_FRAME);
@@ -306,11 +268,7 @@ function [responseFilter, peakResponses] = applyPPFFiltering(dF_values, threshol
     peakResponses.peak1Only = response1Filter & ~response2Filter;
     peakResponses.peak2Only = ~response1Filter & response2Filter;
     
-    if cfg.debug.VERBOSE_FILTERING
-        fprintf('    PPF filtering (%dms): both=%d, peak1=%d, peak2=%d, either=%d ROIs (%.0f%% threshold)\n', ...
-                timepoint_ms, sum(peakResponses.bothPeaks), sum(peakResponses.peak1Only), ...
-                sum(peakResponses.peak2Only), sum(responseFilter), thresholdPercentage*100);
-    end
+    % MINIMAL OUTPUT: No detailed PPF filtering logging
 end
 
 function maxResponse = getStimulusResponse(dF_values, stimulusFrame, postWindow)
@@ -327,7 +285,7 @@ function maxResponse = getStimulusResponse(dF_values, stimulusFrame, postWindow)
 end
 
 function [cleanData, cleanHeaders, cleanThresholds] = removeEmptyROIs(dF_values, headers, thresholds, cfg)
-    % Remove empty ROIs with configurable noise threshold
+    % UPDATED: Remove empty ROIs with minimal output
     
     nonEmptyROIs = ~all(isnan(dF_values), 1) & var(dF_values, 0, 1, 'omitnan') > 0;
     
@@ -336,20 +294,13 @@ function [cleanData, cleanHeaders, cleanThresholds] = removeEmptyROIs(dF_values,
         baselineNoise = std(dF_values(baselineWindow, :), 0, 1, 'omitnan');
         noiseFilter = baselineNoise <= cfg.filtering.MAX_BASELINE_NOISE;
         nonEmptyROIs = nonEmptyROIs & noiseFilter;
-        
-        if cfg.debug.VERBOSE_FILTERING && sum(~noiseFilter) > 0
-            fprintf('    Removed %d ROIs due to excessive baseline noise\n', sum(~noiseFilter));
-        end
     end
     
     cleanData = dF_values(:, nonEmptyROIs);
     cleanHeaders = headers(nonEmptyROIs);
     cleanThresholds = thresholds(nonEmptyROIs);
     
-    removed = sum(~nonEmptyROIs);
-    if removed > 0 && cfg.debug.VERBOSE_FILTERING
-        fprintf('    Removed %d empty/noisy ROIs\n', removed);
-    end
+    % MINIMAL OUTPUT: No empty ROI removal logging
 end
 
 function [cleanData, cleanHeaders, cleanThresholds] = removeDuplicateROIs(dF_values, headers, thresholds, cfg)
@@ -359,13 +310,11 @@ function [cleanData, cleanHeaders, cleanThresholds] = removeDuplicateROIs(dF_val
     cleanHeaders = headers;
     cleanThresholds = thresholds;
     
-    if cfg.debug.VERBOSE_FILTERING
-        fprintf('    Duplicate removal: feature currently disabled\n');
-    end
+    % MINIMAL OUTPUT: No duplicate removal logging
 end
 
 function stats = generateFilteringStats(originalHeaders, responseFilter, noiseClassification, experimentType, cfg)
-    % Generate comprehensive filtering statistics with config-aware reporting
+    % UPDATED: Generate comprehensive filtering statistics with minimal output
     
     stats = struct();
     stats.experimentType = experimentType;

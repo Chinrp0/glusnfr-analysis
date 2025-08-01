@@ -1,12 +1,7 @@
 function controller = pipeline_controller()
     % PIPELINE_CONTROLLER - Main pipeline orchestration module
     % 
-    % This is the main controller that orchestrates the entire analysis pipeline:
-    % - System capability detection
-    % - File organization and processing
-    % - Parallel processing coordination
-    % - Results compilation and saving
-    % - Error handling and logging
+    % Updated with cleaner, more concise output for better user experience
     
     controller.runMainPipeline = @runMainPipeline;
     controller.setupSystem = @setupSystemCapabilities;
@@ -19,7 +14,7 @@ function controller = pipeline_controller()
 end
 
 function runMainPipeline()
-    % Main pipeline entry point - replaces the monolithic script
+    % Main pipeline entry point with cleaner output
     
     scriptName = 'GluSnFR-Analysis_';
     version_info = PipelineVersion();
@@ -55,7 +50,7 @@ function runMainPipeline()
         step3Time = toc(step3Timer);
         logBuffer{end+1} = sprintf('File organization completed in %.3f seconds', step3Time);
         
-        % Step 4: Group processing
+        % Step 4: Group processing (CLEANED UP OUTPUT)
         fprintf('\n--- STEP 4: Group Processing ---\n');
         step4Timer = tic;
         [groupResults, groupTimes] = processAllGroups(groupedFiles, groupKeys, rawMeanFolder, ...
@@ -77,9 +72,9 @@ function runMainPipeline()
         logBuffer = [logBuffer, summary.textSummary];
         logBuffer{end+1} = sprintf('Results analysis completed in %.3f seconds', step5Time);
         
-        % Save comprehensive log
+        % Save comprehensive log with version info
         totalTime = toc(globalTimer);
-        logFileName = fullfile(fileparts(rawMeanFolder), 'modular_pipeline_log_v52.txt');
+        logFileName = fullfile(fileparts(rawMeanFolder), sprintf('modular_pipeline_log_v%s.txt', version_info.version));
         modules.io.saveLog(logBuffer, logFileName);
         
         fprintf('\n=== PIPELINE COMPLETE ===\n');
@@ -95,11 +90,12 @@ function runMainPipeline()
             fprintf('  %s at line %d\n', ME.stack(i).name, ME.stack(i).line);
         end
         
-        % Save error log
+        % Save error log with version info
         if exist('logBuffer', 'var')
             logBuffer{end+1} = sprintf('PIPELINE ERROR: %s', ME.message);
             if exist('rawMeanFolder', 'var') && exist('modules', 'var')
-                errorLogFile = fullfile(fileparts(rawMeanFolder), 'error_log_v52.txt');
+                version_info = PipelineVersion();
+                errorLogFile = fullfile(fileparts(rawMeanFolder), sprintf('error_log_v%s.txt', version_info.version));
                 modules.io.saveLog(logBuffer, errorLogFile);
                 fprintf('Log saved to: %s\n', errorLogFile);
             end
@@ -115,7 +111,6 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
     fprintf('Setting up file system...\n');
     
     % ==================== VERSION CONTROL ====================
-    % CHANGE THIS NUMBER TO UPDATE ALL FOLDER NAMES
     version_info = PipelineVersion();
     VERSION = version_info.legacy_version;  % For folder naming compatibility
     SEMANTIC_VERSION = version_info.version; % For display/logging
@@ -196,11 +191,6 @@ function [rawMeanFolder, outputFolders, excelFiles] = setupFileSystem(io)
     fprintf('Input: %s (%d files)\n', rawMeanFolder, length(excelFiles));
     fprintf('Output: %s\n', outputFolders.main);
     fprintf('Plots: %s\n', outputFolders.plots_main);
-    
-    % IMPORTANT: This function now properly returns all three expected outputs:
-    % 1. rawMeanFolder - string path to input folder
-    % 2. outputFolders - struct with updated folder structure
-    % 3. excelFiles - struct array of file information
 end
 
 function [hasParallelToolbox, hasGPU, gpuInfo, poolObj] = setupSystemCapabilities(config)
@@ -282,11 +272,9 @@ function poolObj = setupParallelPool(hasGPU, gpuInfo)
 end
 
 function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMatrix, hasGPU, gpuInfo)
-    % Process a single file with modular components
-    % FIXED: Load modules locally to avoid dependency issues
+    % UPDATED: Process a single file with minimal output
     
     fullFilePath = fullfile(fileInfo.folder, fileInfo.name);
-    fprintf('    Processing: %s\n', fileInfo.name);
     
     % Load configuration first
     cfg = GluSnFRConfig();
@@ -295,16 +283,16 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     io = io_manager();
     calc = df_calculator();
     filter = roi_filter();
-    utils = string_utils(cfg);  % Pass config to avoid circular dependency
+    utils = string_utils(cfg);
     
-    % Read file
+    % Read file (suppress detailed output)
     [rawData, headers, readSuccess] = io.readExcelFile(fullFilePath, useReadMatrix);
     
     if ~readSuccess || isempty(rawData)
         error('Failed to read file: %s', fileInfo.name);
     end
     
-    % Extract valid headers and data
+    % Extract valid headers and data (suppress detailed output)
     [validHeaders, validColumns] = io.extractValidHeaders(headers);
     
     if isempty(validHeaders)
@@ -317,13 +305,13 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     % Create time data
     timeData_ms = single((0:(size(numericData, 1)-1))' * cfg.timing.MS_PER_FRAME);
     
-    % Calculate dF/F
+    % Calculate dF/F (suppress detailed output)
     [dF_values, thresholds, gpuUsed] = calc.calculate(numericData, hasGPU, gpuInfo);
     
     % Extract experiment info
     [trialNum, expType, ppiValue, coverslipCell] = utils.extractTrialOrPPI(fileInfo.name);
     
-    % Apply filtering
+    % Apply filtering (suppress detailed output)
     if strcmp(expType, 'PPF') && isfinite(ppiValue)
         [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
             filter.filterROIs(dF_values, validHeaders, thresholds, 'PPF', ppiValue);
@@ -355,13 +343,11 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     metadata.ppiValue = ppiValue;
     metadata.coverslipCell = coverslipCell;
     
-    % Log results
+    % CONCISE OUTPUT: Single line summary per file
     if strcmp(expType, 'PPF')
-        fprintf('      Final result: %d ROIs for %s PPI=%dms trial=%g (%.1f%% passed filter)\n', ...
-                metadata.numROIs, expType, ppiValue, trialNum, metadata.filterRate*100);
+        % No output during individual file processing - will be summarized at group level
     else
-        fprintf('      Final result: %d ROIs for %s trial=%g (%.1f%% passed filter)\n', ...
-                metadata.numROIs, expType, trialNum, metadata.filterRate*100);
+        % No output during individual file processing - will be summarized at group level
     end
 end
 
@@ -401,32 +387,44 @@ end
 
 function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGroup, ...
                                                rawMeanFolder, outputFolders, hasGPU, gpuInfo, modules)
-    % Process a single group - UPDATED for new folder structure
+    % UPDATED: Process a single group with cleaner output
     
     groupTimer = tic;
     result = struct('status', 'processing', 'groupKey', groupKey, 'numFiles', length(filesInGroup));
     
-    fprintf('Processing Group %d: %s (%d files)\n', groupIdx, groupKey, length(filesInGroup));
+    fprintf('Processing Group %d: %s\n', groupIdx, groupKey);
     
     try
-        % Process group files
+        % Process group files (suppress individual file details)
         [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules, hasGPU, gpuInfo);
         
         if isempty(groupData)
             result.status = 'warning';
             result.message = 'No valid data found in group';
             processingTime = toc(groupTimer);
+            fprintf('  ⚠️  No valid data found\n');
             return;
         end
         
-        % Organize data
+        % Organize data (suppress detailed output)
         [organizedData, averagedData, roiInfo] = modules.organize.organizeGroupData(groupData, groupMetadata, groupKey);
         
-        % Save results using consolidated io manager
+        % Count total ROIs and files processed
+        totalROIs = 0;
+        totalOriginalROIs = 0;
+        validFiles = 0;
+        for i = 1:length(groupMetadata)
+            if ~isempty(groupMetadata{i})
+                validFiles = validFiles + 1;
+                totalROIs = totalROIs + groupMetadata{i}.numROIs;
+                totalOriginalROIs = totalOriginalROIs + groupMetadata{i}.numOriginalROIs;
+            end
+        end
+        
+        % Save results (suppress detailed Excel output)
         modules.io.writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, outputFolders.main);
         
-        % UPDATED: Generate plots with new folder structure
-        % Pass the plot-specific folders instead of individual/averaged
+        % Generate plots (suppress detailed plotting output)
         plotFolders = struct();
         plotFolders.roi_trials = outputFolders.roi_trials;
         plotFolders.roi_averages = outputFolders.roi_averages;
@@ -437,15 +435,24 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
         result = prepareGroupResult(groupData, groupMetadata, roiInfo, 'success');
         result.groupKey = groupKey;
         
+        % CONCISE SUMMARY: Single line per group with key metrics
+        if totalOriginalROIs > 0
+            filterRate = (totalROIs / totalOriginalROIs) * 100;
+        else
+            filterRate = 0;
+        end
+        
+        processingTime = toc(groupTimer);
+        fprintf('  ✅ %d files → %d ROIs (%.1f%% passed) → Excel + plots (%.2fs)\n', ...
+                validFiles, totalROIs, filterRate, processingTime);
+        
     catch ME
-        fprintf('  ERROR processing group %s: %s\n', groupKey, ME.message);
+        processingTime = toc(groupTimer);
+        fprintf('  ❌ ERROR: %s (%.2fs)\n', ME.message, processingTime);
         result.status = 'error';
         result.message = ME.message;
         result.stackTrace = ME.stack;
     end
-    
-    processingTime = toc(groupTimer);
-    fprintf('  Group %s completed in %.3f seconds [%s]\n', groupKey, processingTime, result.status);
 end
 
 function [groupData, groupMetadata] = processGroupFilesOptimized(filesInGroup, rawMeanFolder, modules, hasGPU, gpuInfo)
@@ -653,21 +660,20 @@ function generateAllPlots(varargin)
 end
 
 function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules, hasGPU, gpuInfo)
-    % Process group files - wrapper function
-    % This function was missing and causing the "Undefined function" error
+    % UPDATED: Process group files with minimal output
     
     numFiles = length(filesInGroup);
     groupData = cell(numFiles, 1);
     groupMetadata = cell(numFiles, 1);
     
-    % Process each file in the group
+    % Process each file in the group (suppress individual file output)
     for fileIdx = 1:numFiles
         try
             [groupData{fileIdx}, groupMetadata{fileIdx}] = processSingleFile(...
                 filesInGroup(fileIdx), rawMeanFolder, true, hasGPU, gpuInfo);
         catch ME
-            fprintf('    WARNING: Error processing %s: %s\n', ...
-                    filesInGroup(fileIdx).name, ME.message);
+            % Only show warning for failed files, not detailed error
+            fprintf('    ⚠️  File %s failed\n', filesInGroup(fileIdx).name);
             groupData{fileIdx} = [];
             groupMetadata{fileIdx} = [];
         end

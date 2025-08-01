@@ -1,8 +1,8 @@
 GluSnFR Pipeline Error Report
-Time: 31-Jul-2025 22:15:56
+Time: 31-Jul-2025 23:25:40
 Error: No groups processed successfully
 
 Stack Trace:
-  validateProcessingResults (line 642)
-  runMainPipeline (line 67)
+  validateProcessingResults (line 649)
+  runMainPipeline (line 62)
   main_glusnfr_pipeline (line 28)

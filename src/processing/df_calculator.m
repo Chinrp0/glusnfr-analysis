@@ -1,20 +1,13 @@
 function calculator = df_calculator()
     % DF_CALCULATOR - Main entry point for dF/F calculation
     % 
-    % This wrapper function provides the enhanced calculator
-    % with optimized GPU utilization and memory management
+    % Updated with minimal output for cleaner user experience
     
     calculator = df_calculator_enhanced();
 end
 
 function calculator = df_calculator_enhanced()
-    % DF_CALCULATOR_ENHANCED - Optimized GPU utilization
-    % 
-    % Improvements:
-    % - Dynamic GPU threshold based on actual performance
-    % - GPU memory pool management
-    % - Optimized data transfer patterns
-    % - GPU-accelerated filtering operations
+    % DF_CALCULATOR_ENHANCED - Optimized GPU utilization with minimal output
     
     calculator.calculate = @calculateDFOptimizedEnhanced;
     calculator.calculateBatch = @calculateBatchGPU;
@@ -59,7 +52,7 @@ function useGPU = shouldUseGPUEnhanced(dataSize, hasGPU, gpuInfo, cfg)
 end
 
 function [dF_values, thresholds, gpuUsed] = calculateDFOptimizedEnhanced(traces, hasGPU, gpuInfo)
-    % ENHANCED: GPU calculation with memory pooling and batch processing
+    % UPDATED: GPU calculation with minimal output
     
     cfg = GluSnFRConfig();
     [n_frames, n_rois] = size(traces);
@@ -68,9 +61,7 @@ function [dF_values, thresholds, gpuUsed] = calculateDFOptimizedEnhanced(traces,
     % Enhanced GPU decision
     useGPU = shouldUseGPUEnhanced(dataSize, hasGPU, gpuInfo, cfg);
     
-    fprintf('    Processing %d ROIs × %d frames (%s, %.1fMB)\n', ...
-            n_rois, n_frames, ...
-            ternary(useGPU, 'GPU', 'CPU'), dataSize*4/1e6);
+    % MINIMAL OUTPUT: No detailed processing information
     
     if useGPU
         try
@@ -79,12 +70,10 @@ function [dF_values, thresholds, gpuUsed] = calculateDFOptimizedEnhanced(traces,
             gpuUsed = true;
             
         catch ME
-            fprintf('    GPU enhanced failed (%s), trying standard GPU\n', ME.message);
             try
                 [dF_values, thresholds] = calculateGPUOptimized(traces, cfg);
                 gpuUsed = true;
             catch
-                fprintf('    GPU failed, using CPU\n');
                 [dF_values, thresholds] = calculateCPUOptimized(traces, cfg);
                 gpuUsed = false;
             end
@@ -143,7 +132,7 @@ function [dF_values, thresholds] = calculateGPUSingleTransfer(traces, baseline_w
 end
 
 function [dF_values, thresholds] = calculateGPUChunked(traces, baseline_window, cfg, gpuInfo)
-    % Chunked GPU processing for large datasets
+    % Chunked GPU processing for large datasets (minimal output)
     
     [n_frames, n_rois] = size(traces);
     
@@ -156,9 +145,7 @@ function [dF_values, thresholds] = calculateGPUChunked(traces, baseline_window, 
     dF_values = zeros(n_frames, n_rois, 'single');
     thresholds = zeros(1, n_rois, 'single');
     
-    fprintf('      GPU chunked processing: %d ROIs per chunk\n', maxROIsPerChunk);
-    
-    % Process in chunks
+    % Process in chunks (no output)
     for startROI = 1:maxROIsPerChunk:n_rois
         endROI = min(startROI + maxROIsPerChunk - 1, n_rois);
         roiIndices = startROI:endROI;
@@ -174,8 +161,7 @@ function [dF_values, thresholds] = calculateGPUChunked(traces, baseline_window, 
 end
 
 function [groupResults, processingTimes] = calculateBatchGPU(tracesCell, hasGPU, gpuInfo)
-    % ENHANCED: Batch processing multiple experiments on GPU
-    % Reduces GPU initialization overhead
+    % ENHANCED: Batch processing multiple experiments on GPU (minimal output)
     
     numGroups = length(tracesCell);
     groupResults = cell(numGroups, 1);
@@ -195,7 +181,6 @@ function [groupResults, processingTimes] = calculateBatchGPU(tracesCell, hasGPU,
             end
             
         catch ME
-            fprintf('Batch GPU processing failed: %s\n', ME.message);
             % Fallback to individual processing
             for i = 1:numGroups
                 tic;
@@ -250,8 +235,6 @@ function optimizeGPUMemoryUsage()
             % This reduces allocation overhead for subsequent operations
             dummy = gpuArray.zeros(1000, 1000, 'single');
             clear dummy;
-            
-            fprintf('  GPU memory optimized\n');
         end
     catch
         % GPU optimization failed, continue without
