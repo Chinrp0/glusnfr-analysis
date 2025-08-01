@@ -158,6 +158,111 @@ function [data, headers, success] = readExcelFileRobust(filepath, useReadMatrix)
     end
 end
 
+function [rawData, headers, success] = readExcelFileOptimized(filepath, io)
+    % OPTIMIZED: Faster Excel reading with better fallback strategy
+    
+    success = false;
+    rawData = [];
+    headers = {};
+    
+    try
+        % Method 1: readmatrix (fastest for numeric data) - MATLAB R2019a+
+        if ~verLessThan('matlab', '9.6')
+            try
+                % Read data portion directly as matrix
+                rawMatrix = readmatrix(filepath, 'Range', 'A3:ZZ10000'); % Adjust range as needed
+                % Read headers separately  
+                headerTable = readtable(filepath, 'Range', 'A2:ZZ2', 'ReadVariableNames', false);
+                headers = table2cell(headerTable);
+                rawData = rawMatrix;
+                success = true;
+                return;
+            catch
+                % Fall back to original method
+            end
+        end
+        
+        % Method 2: Original method as fallback
+        [rawData, headers, success] = io.readExcelFile(filepath, true);
+        
+    catch ME
+        error('Optimized Excel reading failed: %s', ME.message);
+        success = false;
+    end
+end
+
+function [data, metadata] = processFileData(rawData, headers, fileInfo, calc, filter, utils, hasGPU, gpuInfo)
+    % Process individual file data (extracted from processSingleFile for parallel use)
+    
+    cfg = calc.config;
+    
+    % Extract valid data
+    [validHeaders, validColumns] = extractValidHeadersOptimized(headers);
+    if isempty(validHeaders)
+        error('No valid ROI headers found');
+    end
+    
+    % Vectorized data extraction
+    numericData = single(rawData(:, validColumns));
+    timeData_ms = single((0:(size(numericData, 1)-1))' * cfg.timing.MS_PER_FRAME);
+    
+    % Calculate dF/F with optimized GPU decision
+    [dF_values, thresholds, gpuUsed] = calc.calculate(numericData, hasGPU, gpuInfo);
+    
+    % Extract experiment info
+    [trialNum, expType, ppiValue, coverslipCell] = utils.extractTrialOrPPI(fileInfo.name);
+    
+    % Apply filtering
+    if strcmp(expType, 'PPF') && isfinite(ppiValue)
+        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
+            filter.filterROIs(dF_values, validHeaders, thresholds, 'PPF', ppiValue);
+    else
+        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
+            filter.filterROIs(dF_values, validHeaders, thresholds, '1AP');
+    end
+    
+    % Package results
+    data = struct();
+    data.timeData_ms = timeData_ms;
+    data.dF_values = finalDFValues;
+    data.roiNames = finalHeaders;
+    data.thresholds = finalThresholds;
+    data.stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS;
+    data.gpuUsed = gpuUsed;
+    data.filterStats = filterStats;
+    
+    metadata = struct();
+    metadata.filename = fileInfo.name;
+    metadata.numFrames = size(numericData, 1);
+    metadata.numROIs = length(finalHeaders);
+    metadata.numOriginalROIs = length(validHeaders);
+    metadata.filterRate = metadata.numROIs / metadata.numOriginalROIs;
+    metadata.gpuUsed = gpuUsed;
+    metadata.dataType = 'single';
+    metadata.trialNumber = trialNum;
+    metadata.experimentType = expType;
+    metadata.ppiValue = ppiValue;
+    metadata.coverslipCell = coverslipCell;
+end
+
+function [validHeaders, validColumns] = extractValidHeadersOptimized(headers)
+    % OPTIMIZED: Vectorized header extraction
+    
+    % Vectorized approach - much faster than loops
+    isValidCell = ~cellfun(@isempty, headers) & ...
+                  (cellfun(@ischar, headers) | cellfun(@isstring, headers));
+    
+    validIndices = find(isValidCell);
+    validHeaders = headers(validIndices);
+    
+    % Remove empty strings
+    nonEmptyMask = ~cellfun(@(x) isempty(strtrim(char(x))), validHeaders);
+    validHeaders = validHeaders(nonEmptyMask);
+    validColumns = validIndices(nonEmptyMask);
+    
+    fprintf('      Extracted %d valid headers (vectorized)\n', length(validHeaders));
+end
+
 function numericData = convertToNumeric(dataRows)
     % Optimized cell array to numeric conversion
     

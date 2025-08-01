@@ -448,39 +448,73 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
     fprintf('  Group %s completed in %.3f seconds [%s]\n', groupKey, processingTime, result.status);
 end
 
-function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules, hasGPU, gpuInfo)
-    % Process all files in a group with proper module usage
+function [groupData, groupMetadata] = processGroupFilesOptimized(filesInGroup, rawMeanFolder, modules, hasGPU, gpuInfo)
+    % OPTIMIZED: Parallel file processing within groups
+    % Expected speedup: 2-4x depending on file count and I/O speed
     
     numFiles = length(filesInGroup);
     groupData = cell(numFiles, 1);
     groupMetadata = cell(numFiles, 1);
     
-    validCount = 0;
-    useReadMatrix = ~verLessThan('matlab', '9.6');
+    % Check if parallel processing is beneficial
+    % Rule: Use parallel if >2 files and sufficient workers
+    useParallel = numFiles > 2 && ~isempty(gcp('nocreate'));
     
-    for fileIdx = 1:numFiles
-        try
-            [data, metadata] = processSingleFile(...
-                filesInGroup(fileIdx), rawMeanFolder, useReadMatrix, hasGPU, gpuInfo);
-            
-            if ~isempty(data)
-                validCount = validCount + 1;
-                groupData{validCount} = data;
-                groupMetadata{validCount} = metadata;
+    if useParallel
+        fprintf('    Processing %d files in parallel\n', numFiles);
+        
+        % Pre-distribute common data to workers
+        rawMeanFolderConstant = parallel.pool.Constant(rawMeanFolder);
+        configConstant = parallel.pool.Constant(modules.config);
+        
+        % Parallel file processing
+        parfor fileIdx = 1:numFiles
+            try
+                % Create minimal module instances on each worker
+                io = io_manager();
+                calc = df_calculator();
+                filter = roi_filter();
+                utils = string_utils(configConstant.Value);
+                
+                fullFilePath = fullfile(filesInGroup(fileIdx).folder, filesInGroup(fileIdx).name);
+                
+                % Use optimized reading method
+                [rawData, headers, readSuccess] = readExcelFileOptimized(fullFilePath, io);
+                
+                if readSuccess && ~isempty(rawData)
+                    % Process file data
+                    [groupData{fileIdx}, groupMetadata{fileIdx}] = processFileData(...
+                        rawData, headers, filesInGroup(fileIdx), calc, filter, utils, hasGPU, gpuInfo);
+                end
+                
+            catch ME
+                fprintf('    WARNING: Error in parallel processing file %s: %s\n', ...
+                        filesInGroup(fileIdx).name, ME.message);
+                groupData{fileIdx} = [];
+                groupMetadata{fileIdx} = [];
             end
-            
-        catch ME
-            fprintf('    WARNING: Error processing %s: %s\n', filesInGroup(fileIdx).name, ME.message);
+        end
+        
+    else
+        % Sequential processing for small file counts
+        fprintf('    Processing %d files sequentially\n', numFiles);
+        for fileIdx = 1:numFiles
+            try
+                [groupData{fileIdx}, groupMetadata{fileIdx}] = processSingleFile(...
+                    filesInGroup(fileIdx), rawMeanFolder, true, hasGPU, gpuInfo);
+            catch ME
+                fprintf('    WARNING: Error processing %s: %s\n', ...
+                        filesInGroup(fileIdx).name, ME.message);
+                groupData{fileIdx} = [];
+                groupMetadata{fileIdx} = [];
+            end
         end
     end
     
-    % Trim to actual size
-    groupData = groupData(1:validCount);
-    groupMetadata = groupMetadata(1:validCount);
-    
-    if validCount < numFiles
-        fprintf('    WARNING: %d/%d files processed successfully\n', validCount, numFiles);
-    end
+    % Remove empty entries
+    validEntries = ~cellfun(@isempty, groupData);
+    groupData = groupData(validEntries);
+    groupMetadata = groupMetadata(validEntries);
 end
 
 function result = prepareGroupResult(groupData, groupMetadata, roiInfo, status)

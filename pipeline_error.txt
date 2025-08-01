@@ -1,7 +1,8 @@
 GluSnFR Pipeline Error Report
-Time: 30-Jul-2025 12:02:08
-Error: Unrecognized field name "createResultsSummary".
+Time: 31-Jul-2025 22:15:56
+Error: No groups processed successfully
 
 Stack Trace:
+  validateProcessingResults (line 642)
   runMainPipeline (line 67)
-  main_glusnfr_pipeline (line 27)
+  main_glusnfr_pipeline (line 28)

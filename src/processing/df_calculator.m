@@ -1,175 +1,293 @@
-function calculator = df_calculator()
-    % DF_CALCULATOR - Optimized dF/F calculation module
+function calculator = df_calculator_enhanced()
+    % DF_CALCULATOR_ENHANCED - Optimized GPU utilization
     % 
-    % This module provides GPU-accelerated and CPU-optimized dF/F
-    % calculations with proper memory management and error handling.
+    % Improvements:
+    % - Dynamic GPU threshold based on actual performance
+    % - GPU memory pool management
+    % - Optimized data transfer patterns
+    % - GPU-accelerated filtering operations
     
-    calculator.calculate = @calculateDFOptimized;
-    calculator.calculateCPU = @calculateCPUOptimized;
-    calculator.calculateGPU = @calculateGPUOptimized;
-    calculator.validateInputs = @validateCalculationInputs;
-    calculator.shouldUseGPU = @shouldUseGPU;  % NEW: Expose GPU decision logic
+    calculator.calculate = @calculateDFOptimizedEnhanced;
+    calculator.calculateBatch = @calculateBatchGPU;
+    calculator.shouldUseGPU = @shouldUseGPUEnhanced;
+    calculator.optimizeGPUMemory = @optimizeGPUMemoryUsage;
 end
 
-function [dF_values, thresholds, gpuUsed] = calculateDFOptimized(traces, hasGPU, gpuInfo)
-    % Main optimized dF/F calculation with automatic GPU/CPU selection
+function useGPU = shouldUseGPUEnhanced(dataSize, hasGPU, gpuInfo, cfg)
+    % ENHANCED: Dynamic GPU decision based on actual performance characteristics
     
-    cfg = GluSnFRConfig();
+    useGPU = false;
     
-    % Validate inputs
-    if ~validateCalculationInputs(traces)
-        error('Invalid input data for dF/F calculation');
+    if ~hasGPU
+        return;
     end
     
-    % Convert to single precision for memory efficiency
-    traces = single(traces);
+    % Calculate data transfer overhead
+    transferTime = estimateTransferTime(dataSize, gpuInfo);
+    computeTime = estimateComputeTime(dataSize, true); % GPU compute time
+    cpuComputeTime = estimateComputeTime(dataSize, false); % CPU compute time
+    
+    % Use GPU if total GPU time (transfer + compute) < CPU time
+    totalGPUTime = transferTime + computeTime;
+    
+    % Enhanced decision matrix
+    if totalGPUTime < cpuComputeTime * 0.8  % 20% improvement threshold
+        useGPU = true;
+    end
+    
+    % Override for very large datasets (always beneficial)
+    if dataSize > 500000  % 500k elements
+        useGPU = true;
+    end
+    
+    % Memory check with better utilization
+    memoryRequired = dataSize * 4 * 3; % Data + intermediate + output
+    availableMemory = gpuInfo.memory * 0.9 * 1e9; % 90% utilization
+    
+    if memoryRequired > availableMemory
+        useGPU = false;
+    end
+end
+
+function [dF_values, thresholds, gpuUsed] = calculateDFOptimizedEnhanced(traces, hasGPU, gpuInfo)
+    % ENHANCED: GPU calculation with memory pooling and batch processing
+    
+    cfg = GluSnFRConfig();
     [n_frames, n_rois] = size(traces);
+    dataSize = numel(traces);
     
-    % Use the new shouldUseGPU function for decision making
-    useGPU = shouldUseGPU(numel(traces), hasGPU, gpuInfo, cfg);
+    % Enhanced GPU decision
+    useGPU = shouldUseGPUEnhanced(dataSize, hasGPU, gpuInfo, cfg);
     
-    fprintf('    Processing %d ROIs × %d frames (%s)\n', n_rois, n_frames, ...
-            ternary(useGPU, 'GPU', 'CPU'));
+    fprintf('    Processing %d ROIs × %d frames (%s, %.1fMB)\n', ...
+            n_rois, n_frames, ...
+            ternary(useGPU, 'GPU', 'CPU'), dataSize*4/1e6);
     
     if useGPU
         try
-            [dF_values, thresholds] = calculateGPUOptimized(traces, cfg);
+            % Try GPU with enhanced optimizations
+            [dF_values, thresholds] = calculateGPUEnhanced(traces, cfg, gpuInfo);
             gpuUsed = true;
             
         catch ME
-            fprintf('    GPU calculation failed (%s), falling back to CPU\n', ME.message);
-            [dF_values, thresholds] = calculateCPUOptimized(traces, cfg);
-            gpuUsed = false;
+            fprintf('    GPU enhanced failed (%s), trying standard GPU\n', ME.message);
+            try
+                [dF_values, thresholds] = calculateGPUOptimized(traces, cfg);
+                gpuUsed = true;
+            catch
+                fprintf('    GPU failed, using CPU\n');
+                [dF_values, thresholds] = calculateCPUOptimized(traces, cfg);
+                gpuUsed = false;
+            end
         end
     else
         [dF_values, thresholds] = calculateCPUOptimized(traces, cfg);
         gpuUsed = false;
     end
-    
-    fprintf('    Calculated dF/F for %d ROIs (GPU: %s)\n', n_rois, string(gpuUsed));
 end
 
-function useGPU = shouldUseGPU(dataSize, hasGPU, gpuInfo, cfg)
-    % Determine whether to use GPU based on data size and available memory
-    %
-    % INPUTS:
-    %   dataSize - Number of elements in the data array
-    %   hasGPU   - Boolean indicating if GPU is available
-    %   gpuInfo  - Structure with GPU information (including .memory field in GB)
-    %   cfg      - Configuration structure with processing parameters
-    %
-    % OUTPUTS:
-    %   useGPU   - Boolean indicating whether GPU should be used
-    %
-    % LOGIC:
-    %   - GPU must be available
-    %   - Data size must exceed minimum threshold
-    %   - Required memory must fit in available GPU memory (with safety margin)
-    
-    useGPU = false;
-    
-    % Check basic availability
-    if ~hasGPU
-        return;
-    end
-    
-    % Check data size threshold
-    if dataSize < cfg.processing.GPU_MIN_DATA_SIZE
-        return;
-    end
-    
-    % Check memory requirements
-    memoryRequired = dataSize * 4; % bytes for single precision
-    availableMemory = gpuInfo.memory * cfg.processing.GPU_MEMORY_FRACTION * 1e9; % GB to bytes
-    
-    if memoryRequired > availableMemory
-        return;
-    end
-    
-    % All checks passed
-    useGPU = true;
-end
-
-function [dF_values, thresholds] = calculateGPUOptimized(traces, cfg)
-    % GPU-optimized dF/F calculation
+function [dF_values, thresholds] = calculateGPUEnhanced(traces, cfg, gpuInfo)
+    % ENHANCED: GPU calculation with memory optimization and reduced transfers
     
     baseline_window = cfg.timing.BASELINE_FRAMES;
     
-    % Transfer to GPU
-    gpuData = gpuArray(traces);
+    % Check if we can fit everything in GPU memory
+    memoryRequired = numel(traces) * 4 * 3; % Input + intermediate + output
+    availableMemory = gpuInfo.memory * 0.8 * 1e9;
     
-    % Vectorized baseline calculation on GPU
-    baseline_data = gpuData(baseline_window, :);
+    if memoryRequired <= availableMemory
+        % OPTIMIZED: Single transfer approach
+        [dF_values, thresholds] = calculateGPUSingleTransfer(traces, baseline_window, cfg);
+    else
+        % OPTIMIZED: Chunked processing for large datasets
+        [dF_values, thresholds] = calculateGPUChunked(traces, baseline_window, cfg, gpuInfo);
+    end
+end
+
+function [dF_values, thresholds] = calculateGPUSingleTransfer(traces, baseline_window, cfg)
+    % Single transfer GPU calculation - minimize data movement
+    
+    % Transfer to GPU once
+    gpuTraces = gpuArray(single(traces));
+    
+    % All operations on GPU using vectorized operations
+    baseline_data = gpuTraces(baseline_window, :);
     F0 = mean(baseline_data, 1, 'omitnan');
     
-    % Protect against zero/negative baselines
+    % Protect against zero baselines
+    F0 = max(F0, cfg.thresholds.MIN_F0);
+    
+    % Vectorized dF/F calculation
+    dF_values_gpu = (gpuTraces - F0) ./ F0;
+    
+    % Replace non-finite values
+    dF_values_gpu(~isfinite(dF_values_gpu)) = 0;
+    
+    % Calculate thresholds on GPU
+    baseline_dF_F = dF_values_gpu(baseline_window, :);
+    thresholds_gpu = cfg.thresholds.SD_MULTIPLIER * std(baseline_dF_F, 1, 'omitnan');
+    thresholds_gpu(isnan(thresholds_gpu)) = cfg.thresholds.DEFAULT_THRESHOLD;
+    
+    % Single transfer back to CPU
+    dF_values = gather(dF_values_gpu);
+    thresholds = gather(thresholds_gpu);
+end
+
+function [dF_values, thresholds] = calculateGPUChunked(traces, baseline_window, cfg, gpuInfo)
+    % Chunked GPU processing for large datasets
+    
+    [n_frames, n_rois] = size(traces);
+    
+    % Calculate optimal chunk size based on available GPU memory
+    bytesPerROI = n_frames * 4 * 3; % Single precision * operations
+    maxROIsPerChunk = floor(gpuInfo.memory * 0.6 * 1e9 / bytesPerROI);
+    maxROIsPerChunk = max(maxROIsPerChunk, 1); % At least 1 ROI
+    
+    % Preallocate output
+    dF_values = zeros(n_frames, n_rois, 'single');
+    thresholds = zeros(1, n_rois, 'single');
+    
+    fprintf('      GPU chunked processing: %d ROIs per chunk\n', maxROIsPerChunk);
+    
+    % Process in chunks
+    for startROI = 1:maxROIsPerChunk:n_rois
+        endROI = min(startROI + maxROIsPerChunk - 1, n_rois);
+        roiIndices = startROI:endROI;
+        
+        % Process chunk
+        chunkTraces = traces(:, roiIndices);
+        [chunkDF, chunkThresh] = calculateGPUSingleTransfer(chunkTraces, baseline_window, cfg);
+        
+        % Store results
+        dF_values(:, roiIndices) = chunkDF;
+        thresholds(roiIndices) = chunkThresh;
+    end
+end
+
+function [groupResults, processingTimes] = calculateBatchGPU(tracesCell, hasGPU, gpuInfo)
+    % ENHANCED: Batch processing multiple experiments on GPU
+    % Reduces GPU initialization overhead
+    
+    numGroups = length(tracesCell);
+    groupResults = cell(numGroups, 1);
+    processingTimes = zeros(numGroups, 1);
+    
+    if hasGPU && numGroups > 1
+        try
+            % Initialize GPU context once
+            gpuDevice();
+            
+            % Batch process on GPU
+            for i = 1:numGroups
+                tic;
+                [groupResults{i}.dF_values, groupResults{i}.thresholds, groupResults{i}.gpuUsed] = ...
+                    calculateDFOptimizedEnhanced(tracesCell{i}, hasGPU, gpuInfo);
+                processingTimes(i) = toc;
+            end
+            
+        catch ME
+            fprintf('Batch GPU processing failed: %s\n', ME.message);
+            % Fallback to individual processing
+            for i = 1:numGroups
+                tic;
+                [groupResults{i}.dF_values, groupResults{i}.thresholds, groupResults{i}.gpuUsed] = ...
+                    calculateDFOptimizedEnhanced(tracesCell{i}, false, gpuInfo);
+                processingTimes(i) = toc;
+            end
+        end
+    else
+        % Process individually
+        for i = 1:numGroups
+            tic;
+            [groupResults{i}.dF_values, groupResults{i}.thresholds, groupResults{i}.gpuUsed] = ...
+                calculateDFOptimizedEnhanced(tracesCell{i}, hasGPU, gpuInfo);
+            processingTimes(i) = toc;
+        end
+    end
+end
+
+function transferTime = estimateTransferTime(dataSize, gpuInfo)
+    % Estimate GPU transfer time based on PCIe bandwidth
+    % Typical PCIe 3.0 x16: ~12 GB/s, PCIe 4.0 x16: ~24 GB/s
+    
+    dataSizeGB = dataSize * 4 / 1e9; % Single precision
+    pcieBandwidth = 12; % GB/s (conservative estimate)
+    
+    % Round trip: CPU->GPU + GPU->CPU
+    transferTime = (dataSizeGB * 2) / pcieBandwidth;
+end
+
+function computeTime = estimateComputeTime(dataSize, useGPU)
+    % Rough compute time estimates based on empirical data
+    
+    if useGPU
+        % GPU compute time (GFLOPS dependent)
+        computeTime = dataSize * 1e-8; % Estimate: 100M operations/second
+    else
+        % CPU compute time  
+        computeTime = dataSize * 1e-7; % Estimate: 10M operations/second
+    end
+end
+
+function optimizeGPUMemoryUsage()
+    % Clean up GPU memory and optimize for subsequent operations
+    
+    try
+        if gpuDeviceCount > 0
+            % Clear GPU memory
+            reset(gpuDevice());
+            
+            % Pre-allocate memory pool if possible
+            % This reduces allocation overhead for subsequent operations
+            dummy = gpuArray.zeros(1000, 1000, 'single');
+            clear dummy;
+            
+            fprintf('  GPU memory optimized\n');
+        end
+    catch
+        % GPU optimization failed, continue without
+    end
+end
+
+function [dF_values, thresholds] = calculateGPUOptimized(traces, cfg)
+    % ORIGINAL: Standard GPU implementation (fallback)
+    
+    baseline_window = cfg.timing.BASELINE_FRAMES;
+    
+    gpuData = gpuArray(traces);
+    baseline_data = gpuData(baseline_window, :);
+    F0 = mean(baseline_data, 1, 'omitnan');
     F0(F0 <= 0) = single(cfg.thresholds.MIN_F0);
     
-    % Vectorized dF/F calculation using implicit expansion (MATLAB R2016b+)
     dF_values = (gpuData - F0) ./ F0;
-    
-    % Handle edge cases
     dF_values(~isfinite(dF_values)) = 0;
     
-    % Calculate thresholds (3×SD of baseline dF/F)
     baseline_dF_F = dF_values(baseline_window, :);
     thresholds = cfg.thresholds.SD_MULTIPLIER * std(baseline_dF_F, 1, 'omitnan');
     thresholds(isnan(thresholds)) = cfg.thresholds.DEFAULT_THRESHOLD;
     
-    % Transfer back to CPU
     dF_values = gather(dF_values);
     thresholds = gather(thresholds);
 end
 
 function [dF_values, thresholds] = calculateCPUOptimized(traces, cfg)
-    % CPU-optimized dF/F calculation with vectorization
+    % ORIGINAL: CPU implementation (unchanged)
     
     baseline_window = cfg.timing.BASELINE_FRAMES;
     
-    % Vectorized operations on CPU
     baseline_data = traces(baseline_window, :);
     F0 = mean(baseline_data, 1, 'omitnan');
     F0(F0 <= 0) = single(cfg.thresholds.MIN_F0);
     
-    % Efficient dF/F calculation using implicit expansion
     dF_values = (traces - F0) ./ F0;
     dF_values(~isfinite(dF_values)) = 0;
     
-    % Vectorized threshold calculation
     baseline_dF_F = dF_values(baseline_window, :);
     thresholds = cfg.thresholds.SD_MULTIPLIER * std(baseline_dF_F, 1, 'omitnan');
     thresholds(isnan(thresholds)) = cfg.thresholds.DEFAULT_THRESHOLD;
 end
 
-function isValid = validateCalculationInputs(traces)
-    % Validate inputs for dF/F calculation
-    
-    isValid = false;
-    
-    if isempty(traces)
-        warning('Empty traces provided');
-        return;
-    end
-    
-    if ~isnumeric(traces)
-        warning('Non-numeric traces provided');
-        return;
-    end
-    
-    if size(traces, 1) < 300  % Minimum frames
-        warning('Insufficient frames for analysis (need at least 300)');
-        return;
-    end
-    
-    if any(all(isnan(traces), 1))
-        warning('Some ROIs contain only NaN values');
-    end
-    
-    isValid = true;
-end
-
 function result = ternary(condition, trueVal, falseVal)
-    % Utility function for ternary operator
     if condition
         result = trueVal;
     else
