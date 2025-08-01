@@ -1,5 +1,5 @@
-function config = GluSnFRConfigOptimized()
-    % GLUSNFRCONFIGOPTIMIZED - Performance-optimized configuration
+function config = GluSnFRConfig()
+    % GLUSNFRCONFIG - Performance-optimized configuration
     % 
     % Changes from original:
     % - Lower GPU threshold for better utilization

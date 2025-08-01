@@ -651,3 +651,30 @@ end
 function generateAllPlots(varargin)
     warning('generateAllPlots not yet implemented');
 end
+
+function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFolder, modules, hasGPU, gpuInfo)
+    % Process group files - wrapper function
+    % This function was missing and causing the "Undefined function" error
+    
+    numFiles = length(filesInGroup);
+    groupData = cell(numFiles, 1);
+    groupMetadata = cell(numFiles, 1);
+    
+    % Process each file in the group
+    for fileIdx = 1:numFiles
+        try
+            [groupData{fileIdx}, groupMetadata{fileIdx}] = processSingleFile(...
+                filesInGroup(fileIdx), rawMeanFolder, true, hasGPU, gpuInfo);
+        catch ME
+            fprintf('    WARNING: Error processing %s: %s\n', ...
+                    filesInGroup(fileIdx).name, ME.message);
+            groupData{fileIdx} = [];
+            groupMetadata{fileIdx} = [];
+        end
+    end
+    
+    % Remove empty entries
+    validEntries = ~cellfun(@isempty, groupData);
+    groupData = groupData(validEntries);
+    groupMetadata = groupMetadata(validEntries);
+end

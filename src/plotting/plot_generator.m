@@ -1,3 +1,22 @@
+function plot = plot_generator()
+    % PLOT_GENERATOR - Main entry point for plotting system
+    % 
+    % This wrapper function chooses between parallel and legacy plotting
+    % based on system capabilities
+    
+    try
+        % Try to use parallel version if workers are available
+        if ~isempty(gcp('nocreate')) && feature('numcores') >= 4
+            plot = plot_generator_parallel();
+        else
+            plot = plot_generator_legacy();
+        end
+    catch
+        % Fallback to legacy plotting if parallel fails
+        plot = plot_generator_legacy();
+    end
+end
+
 function plot = plot_generator_parallel()
     % PLOT_GENERATOR_PARALLEL - Optimized plotting with parallel generation
     % 

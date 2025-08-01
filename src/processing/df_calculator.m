@@ -1,3 +1,12 @@
+function calculator = df_calculator()
+    % DF_CALCULATOR - Main entry point for dF/F calculation
+    % 
+    % This wrapper function provides the enhanced calculator
+    % with optimized GPU utilization and memory management
+    
+    calculator = df_calculator_enhanced();
+end
+
 function calculator = df_calculator_enhanced()
     % DF_CALCULATOR_ENHANCED - Optimized GPU utilization
     % 
