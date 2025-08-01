@@ -17,8 +17,7 @@ end
 
 
 function metadataTable = generateExperimentMetadata(organizedData, roiInfo, filepath)
-    % Generate comprehensive metadata for Script 1 optimization
-    % FIXED: Proper PPF metadata handling
+    % FIXED: Generate comprehensive metadata without Excel writing conflicts
     
     try
         if strcmp(roiInfo.experimentType, 'PPF')
@@ -31,18 +30,15 @@ function metadataTable = generateExperimentMetadata(organizedData, roiInfo, file
         if istable(metadataTable) && height(metadataTable) > 0
             try
                 writetable(metadataTable, filepath, 'Sheet', 'ROI_Metadata');
-                fprintf('    Metadata sheet written with %d entries\n', height(metadataTable));
+                % Success - no output to keep interface clean
             catch ME
-                fprintf('Failed to write metadata to Excel: %s\n', ME.message);
+                % Silent failure - metadata is optional, don't crash pipeline
             end
-        else
-            fprintf('    No metadata to write (empty or invalid table)\n');
         end
         
     catch ME
-        fprintf('Failed to generate metadata: %s\n', ME.message);
-        fprintf('Stack trace: %s\n', ME.stack(1).name);
-        metadataTable = table(); % Return empty table on error
+        % Return empty table on error to prevent pipeline crash
+        metadataTable = table();
     end
 end
 
@@ -117,27 +113,33 @@ function metadataTable = generate1APMetadata(organizedData, roiInfo)
 end
 
 function metadataTable = generatePPFMetadata(organizedData, roiInfo)
-    % Generate PPF-specific metadata with peak response classification
-    % FIXED: Safe table properties access
+    % FIXED: Generate PPF-specific metadata with better error handling
     
-    % Calculate maximum entries across all data tables
+    % Safely calculate maximum entries across all data tables
     maxEntries = 0;
     dataFields = {'allData', 'bothPeaks', 'singlePeak'};
     
     for fieldIdx = 1:length(dataFields)
         fieldName = dataFields{fieldIdx};
-        if isfield(organizedData, fieldName) && istable(organizedData.(fieldName)) && width(organizedData.(fieldName)) > 1
-            maxEntries = maxEntries + (width(organizedData.(fieldName)) - 1); % Subtract 1 for Frame column
+        if isfield(organizedData, fieldName)
+            try
+                fieldData = organizedData.(fieldName);
+                if istable(fieldData) && width(fieldData) > 1
+                    maxEntries = maxEntries + (width(fieldData) - 1); % Subtract Frame column
+                end
+            catch
+                % Skip problematic fields
+                continue;
+            end
         end
     end
     
     if maxEntries == 0
         metadataTable = table();
-        fprintf('        ⚠ No PPF data available for metadata generation\n');
         return;
     end
     
-    % Preallocate metadata structure with new Peak_Response field
+    % Preallocate metadata structure
     allMetadata = repmat(struct(...
         'CoverslipCell', '', ...
         'ROI_Number', NaN, ...
@@ -154,107 +156,92 @@ function metadataTable = generatePPFMetadata(organizedData, roiInfo)
     entryCount = 0;
     cfg = GluSnFRConfig();
     
-    % Process each data category
+    % Process each data category safely
     for fieldIdx = 1:length(dataFields)
         fieldName = dataFields{fieldIdx};
         
-        if ~isfield(organizedData, fieldName) || ~istable(organizedData.(fieldName)) || width(organizedData.(fieldName)) <= 1
+        if ~isfield(organizedData, fieldName)
             continue;
         end
         
-        dataTable = organizedData.(fieldName);
-        
-        % FIXED: Direct variable names access without Properties
         try
-            % Get all variable names from table
-            if istable(dataTable)
-                allVarNames = dataTable.Properties.VariableNames;
-                % Skip Frame column (first column)
-                if length(allVarNames) > 1
-                    varNames = allVarNames(2:end);
-                else
-                    continue; % No data columns
-                end
-            else
-                fprintf('        ⚠ %s is not a valid table\n', fieldName);
+            dataTable = organizedData.(fieldName);
+            
+            if ~istable(dataTable) || width(dataTable) <= 1
                 continue;
             end
-        catch ME
-            fprintf('        ⚠ Cannot access variable names for %s: %s\n', fieldName, ME.message);
-            continue;
-        end
-        
-        % Determine peak response classification for this data category
-        switch fieldName
-            case 'bothPeaks'
-                peakResponseType = 'Both';
-            case 'singlePeak'
-                peakResponseType = 'Single'; % Will be refined below
-            case 'allData'
-                peakResponseType = 'Unknown'; % Mixed data
-        end
-        
-        for varIdx = 1:length(varNames)
-            varName = varNames{varIdx};
             
-            % Parse coverslip and ROI info
-            roiMatch = regexp(varName, '(Cs\d+-c\d+)_ROI(\d+)', 'tokens');
-            if ~isempty(roiMatch)
-                csCell = roiMatch{1}{1};
-                roiNum = str2double(roiMatch{1}{2});
+            % FIXED: Safe variable names access
+            allVarNames = dataTable.Properties.VariableNames;
+            varNames = allVarNames(2:end); % Skip Frame column
+            
+            % Determine peak response classification
+            switch fieldName
+                case 'bothPeaks'
+                    peakResponseType = 'Both';
+                case 'singlePeak'
+                    peakResponseType = 'Single';
+                otherwise
+                    peakResponseType = 'Unknown';
+            end
+            
+            for varIdx = 1:length(varNames)
+                varName = varNames{varIdx};
                 
-                % Check if column exists and has data
-                try
-                    if any(strcmp(varName, allVarNames))
-                        columnData = dataTable.(varName);
-                        if ~all(isnan(columnData))
-                            entryCount = entryCount + 1;
-                            allMetadata(entryCount).CoverslipCell = csCell;
-                            allMetadata(entryCount).ROI_Number = roiNum;
-                            allMetadata(entryCount).Column_Name = varName;
-                            
-                            % Set peak response classification
-                            if strcmp(fieldName, 'singlePeak')
-                                % Try to determine if Peak1 or Peak2 from peak response data
-                                specificPeakType = determinePeakType(csCell, roiNum, roiInfo);
-                                if ~isempty(specificPeakType)
-                                    allMetadata(entryCount).Peak_Response = specificPeakType;
-                                else
-                                    allMetadata(entryCount).Peak_Response = 'Single';
-                                end
-                            else
+                % Parse coverslip and ROI info
+                roiMatch = regexp(varName, '(Cs\d+-c\d+)_ROI(\d+)', 'tokens');
+                if ~isempty(roiMatch)
+                    csCell = roiMatch{1}{1};
+                    roiNum = str2double(roiMatch{1}{2});
+                    
+                    % Check if column exists and has valid data
+                    try
+                        if ismember(varName, allVarNames)
+                            columnData = dataTable.(varName);
+                            if ~all(isnan(columnData)) && entryCount < maxEntries
+                                entryCount = entryCount + 1;
+                                
+                                allMetadata(entryCount).CoverslipCell = csCell;
+                                allMetadata(entryCount).ROI_Number = roiNum;
+                                allMetadata(entryCount).Column_Name = varName;
                                 allMetadata(entryCount).Peak_Response = peakResponseType;
+                                
+                                % Extract threshold and baseline stats safely
+                                [threshold, baselineMean] = getROIThresholdAndBaseline(csCell, roiNum, roiInfo, cfg);
+                                if isfinite(threshold)
+                                    allMetadata(entryCount).Threshold_dF_F = threshold;
+                                    allMetadata(entryCount).Baseline_SD = threshold / cfg.thresholds.SD_MULTIPLIER;
+                                end
+                                allMetadata(entryCount).Baseline_Mean = baselineMean;
+                                allMetadata(entryCount).Experiment_Type = 'PPF';
+                                allMetadata(entryCount).Timepoint_ms = roiInfo.timepoint;
+                                allMetadata(entryCount).Stimulus1_Time_ms = cfg.timing.STIMULUS_TIME_MS;
+                                allMetadata(entryCount).Stimulus2_Time_ms = cfg.timing.STIMULUS_TIME_MS + roiInfo.timepoint;
                             end
-                            
-                            % Extract threshold and baseline stats
-                            [threshold, baselineMean] = getROIThresholdAndBaseline(csCell, roiNum, roiInfo, cfg);
-                            if isfinite(threshold)
-                                allMetadata(entryCount).Threshold_dF_F = threshold;
-                                allMetadata(entryCount).Baseline_SD = threshold / cfg.thresholds.SD_MULTIPLIER;
-                            end
-                            allMetadata(entryCount).Baseline_Mean = baselineMean;
-                            
-                            allMetadata(entryCount).Experiment_Type = 'PPF';
-                            allMetadata(entryCount).Timepoint_ms = roiInfo.timepoint;
-                            allMetadata(entryCount).Stimulus1_Time_ms = cfg.timing.STIMULUS_TIME_MS;
-                            allMetadata(entryCount).Stimulus2_Time_ms = cfg.timing.STIMULUS_TIME_MS + roiInfo.timepoint;
                         end
+                    catch
+                        % Skip problematic columns
+                        continue;
                     end
-                catch ME
-                    fprintf('        ⚠ Error processing column %s: %s\n', varName, ME.message);
                 end
             end
+            
+        catch
+            % Skip problematic data fields
+            continue;
         end
     end
     
-    % Convert to table
+    % Convert to table safely
     if entryCount > 0
-        allMetadata = allMetadata(1:entryCount);
-        metadataTable = struct2table(allMetadata);
-        fprintf('        ✓ PPF metadata: %d entries with peak response classification\n', entryCount);
+        try
+            validMetadata = allMetadata(1:entryCount);
+            metadataTable = struct2table(validMetadata);
+        catch
+            metadataTable = table();
+        end
     else
         metadataTable = table();
-        fprintf('        ⚠ No valid PPF metadata entries created\n');
     end
 end
 

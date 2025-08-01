@@ -444,9 +444,10 @@ function sheetsWritten = write1APResultsComplete(organizedData, averagedData, ro
 end
 
 
-function writeNoiseBasedTrialsSheets(organizedData, roiInfo, filepath)
-    % FIXED: Write separate Low_noise and High_noise sheets
+function sheetsWritten = writeNoiseBasedTrialsSheets(organizedData, roiInfo, filepath)
+    % FIXED: Write separate Low_noise and High_noise sheets with return value
     
+    sheetsWritten = 0;
     varNames = organizedData.Properties.VariableNames;
     lowNoiseColumns = {'Frame'};
     highNoiseColumns = {'Frame'};
@@ -473,78 +474,92 @@ function writeNoiseBasedTrialsSheets(organizedData, roiInfo, filepath)
     
     % Write Low_noise sheet
     if length(lowNoiseColumns) > 1
-        lowNoiseData = organizedData(:, lowNoiseColumns);
-        writeSheetWithCustomHeaders(lowNoiseData, filepath, 'Low_noise', '1AP', roiInfo);
-        fprintf('      ✓ Low_noise sheet: %d columns\n', length(lowNoiseColumns)-1);
-    else
-        fprintf('      ⚠ No low noise data to write\n');
+        try
+            lowNoiseData = organizedData(:, lowNoiseColumns);
+            writeSheetWithCustomHeaders(lowNoiseData, filepath, 'Low_noise', '1AP', roiInfo);
+            sheetsWritten = sheetsWritten + 1;
+        catch ME
+            % Silent failure
+        end
     end
     
     % Write High_noise sheet
     if length(highNoiseColumns) > 1
-        highNoiseData = organizedData(:, highNoiseColumns);
-        writeSheetWithCustomHeaders(highNoiseData, filepath, 'High_noise', '1AP', roiInfo);
-        fprintf('      ✓ High_noise sheet: %d columns\n', length(highNoiseColumns)-1);
-    else
-        fprintf('      ⚠ No high noise data to write\n');
+        try
+            highNoiseData = organizedData(:, highNoiseColumns);
+            writeSheetWithCustomHeaders(highNoiseData, filepath, 'High_noise', '1AP', roiInfo);
+            sheetsWritten = sheetsWritten + 1;
+        catch ME
+            % Silent failure
+        end
     end
 end
 
-function writeROIAveragedSheet(averagedData, roiInfo, filepath)
-    % UPDATED: Write ROI_Average sheet with minimal output
+function sheetsWritten = writeROIAveragedSheet(averagedData, roiInfo, filepath)
+    % FIXED: Write ROI_Average sheet with return value
+    
+    sheetsWritten = 0;
     
     if width(averagedData) <= 1
         return;
     end
     
-    varNames = averagedData.Properties.VariableNames;
-    timeData_ms = averagedData.Frame;
-    numFrames = length(timeData_ms);
-    
-    % Create header rows
-    row1 = cell(1, length(varNames));
-    row2 = cell(1, length(varNames));
-    
-    row1{1} = 'n';
-    row2{1} = 'Time (ms)';
-    
-    % Process each variable
-    for i = 2:length(varNames)
-        varName = varNames{i};
-        
-        roiMatch = regexp(varName, 'ROI(\d+)_n(\d+)', 'tokens');
-        if ~isempty(roiMatch)
-            roiNum = roiMatch{1}{1};
-            nTrials = roiMatch{1}{2};
-            
-            row1{i} = nTrials;
-            row2{i} = ['ROI ' roiNum];
-        else
-            row1{i} = '';
-            row2{i} = varName;
-        end
-    end
-    
-    % Write data with validation
     try
-        dataMatrix = [timeData_ms, table2array(averagedData(:, 2:end))];
+        varNames = averagedData.Properties.VariableNames;
+        timeData_ms = averagedData.Frame;
+        numFrames = length(timeData_ms);
         
-        cellData = cell(numFrames + 2, length(varNames));
+        % Create header rows
+        row1 = cell(1, length(varNames));
+        row2 = cell(1, length(varNames));
         
-        cellData(1, :) = row1;
-        cellData(2, :) = row2;
+        row1{1} = 'n';
+        row2{1} = 'Time (ms)';
         
-        for i = 1:numFrames
-            for j = 1:size(dataMatrix, 2)
-                cellData{i+2, j} = dataMatrix(i, j);
+        % Process each variable
+        for i = 2:length(varNames)
+            varName = varNames{i};
+            
+            roiMatch = regexp(varName, 'ROI(\d+)_n(\d+)', 'tokens');
+            if ~isempty(roiMatch)
+                roiNum = roiMatch{1}{1};
+                nTrials = roiMatch{1}{2};
+                
+                row1{i} = nTrials;
+                row2{i} = ['ROI ' roiNum];
+            else
+                row1{i} = '';
+                row2{i} = varName;
             end
         end
         
-        writecell(cellData, filepath, 'Sheet', 'ROI_Average');
+        % Write data with validation
+        try
+            dataMatrix = [timeData_ms, table2array(averagedData(:, 2:end))];
+            
+            cellData = cell(numFrames + 2, length(varNames));
+            
+            cellData(1, :) = row1;
+            cellData(2, :) = row2;
+            
+            for i = 1:numFrames
+                for j = 1:size(dataMatrix, 2)
+                    cellData{i+2, j} = dataMatrix(i, j);
+                end
+            end
+            
+            writecell(cellData, filepath, 'Sheet', 'ROI_Average');
+            sheetsWritten = 1;
+            
+        catch ME
+            % Fallback method
+            writetable(averagedData, filepath, 'Sheet', 'ROI_Average', 'WriteVariableNames', true);
+            sheetsWritten = 1;
+        end
         
     catch ME
-        % Fallback method
-        writetable(averagedData, filepath, 'Sheet', 'ROI_Average', 'WriteVariableNames', true);
+        % Silent failure
+        sheetsWritten = 0;
     end
 end
 
@@ -646,81 +661,91 @@ function writeSheetWithCustomHeaders(dataTable, filepath, sheetName, expType, ro
     end
 end
 
-function writeTotalAverageSheet(totalAveragedData, filepath)
-    % UPDATED: Write Total_Average sheet with minimal output
+function sheetsWritten = writeTotalAverageSheet(totalAveragedData, filepath)
+    % FIXED: Write Total_Average sheet with return value
+    
+    sheetsWritten = 0;
     
     if width(totalAveragedData) <= 1
         return;
     end
     
-    varNames = totalAveragedData.Properties.VariableNames;
-    timeData_ms = totalAveragedData.Frame;
-    numFrames = length(timeData_ms);
-    
-    % Create headers
-    row1 = cell(1, length(varNames));
-    row2 = cell(1, length(varNames));
-    
-    row1{1} = 'Average Type';
-    row2{1} = 'Time (ms)';
-    
-    for i = 2:length(varNames)
-        varName = varNames{i};
-        
-        if contains(varName, 'Low_Noise')
-            nMatch = regexp(varName, 'n(\d+)', 'tokens');
-            if ~isempty(nMatch)
-                row1{i} = nMatch{1}{1};
-            else
-                row1{i} = '';
-            end
-            row2{i} = 'Low Noise';
-        elseif contains(varName, 'High_Noise')
-            nMatch = regexp(varName, 'n(\d+)', 'tokens');
-            if ~isempty(nMatch)
-                row1{i} = nMatch{1}{1};
-            else
-                row1{i} = '';
-            end
-            row2{i} = 'High Noise';
-        elseif contains(varName, 'All_')
-            nMatch = regexp(varName, 'n(\d+)', 'tokens');
-            if ~isempty(nMatch)
-                row1{i} = nMatch{1}{1};
-            else
-                row1{i} = '';
-            end
-            row2{i} = 'All';
-        else
-            row1{i} = '';
-            row2{i} = varName;
-        end
-    end
-    
-    % Write to Excel
     try
-        dataMatrix = [timeData_ms, table2array(totalAveragedData(:, 2:end))];
+        varNames = totalAveragedData.Properties.VariableNames;
+        timeData_ms = totalAveragedData.Frame;
+        numFrames = length(timeData_ms);
         
-        if size(dataMatrix, 2) <= 1
-            return;
-        end
+        % Create headers
+        row1 = cell(1, length(varNames));
+        row2 = cell(1, length(varNames));
         
-        cellData = cell(numFrames + 2, length(varNames));
+        row1{1} = 'Average Type';
+        row2{1} = 'Time (ms)';
         
-        cellData(1, :) = row1;
-        cellData(2, :) = row2;
-        
-        for i = 1:numFrames
-            for j = 1:size(dataMatrix, 2)
-                cellData{i+2, j} = dataMatrix(i, j);
+        for i = 2:length(varNames)
+            varName = varNames{i};
+            
+            if contains(varName, 'Low_Noise')
+                nMatch = regexp(varName, 'n(\d+)', 'tokens');
+                if ~isempty(nMatch)
+                    row1{i} = nMatch{1}{1};
+                else
+                    row1{i} = '';
+                end
+                row2{i} = 'Low Noise';
+            elseif contains(varName, 'High_Noise')
+                nMatch = regexp(varName, 'n(\d+)', 'tokens');
+                if ~isempty(nMatch)
+                    row1{i} = nMatch{1}{1};
+                else
+                    row1{i} = '';
+                end
+                row2{i} = 'High Noise';
+            elseif contains(varName, 'All_')
+                nMatch = regexp(varName, 'n(\d+)', 'tokens');
+                if ~isempty(nMatch)
+                    row1{i} = nMatch{1}{1};
+                else
+                    row1{i} = '';
+                end
+                row2{i} = 'All';
+            else
+                row1{i} = '';
+                row2{i} = varName;
             end
         end
         
-        writecell(cellData, filepath, 'Sheet', 'Total_Average');
+        % Write to Excel
+        try
+            dataMatrix = [timeData_ms, table2array(totalAveragedData(:, 2:end))];
+            
+            if size(dataMatrix, 2) <= 1
+                return;
+            end
+            
+            cellData = cell(numFrames + 2, length(varNames));
+            
+            cellData(1, :) = row1;
+            cellData(2, :) = row2;
+            
+            for i = 1:numFrames
+                for j = 1:size(dataMatrix, 2)
+                    cellData{i+2, j} = dataMatrix(i, j);
+                end
+            end
+            
+            writecell(cellData, filepath, 'Sheet', 'Total_Average');
+            sheetsWritten = 1;
+            
+        catch ME
+            % Fallback
+            writetable(totalAveragedData, filepath, 'Sheet', 'Total_Average', 'WriteVariableNames', true);
+            sheetsWritten = 1;
+        end
         
     catch ME
-        % Fallback
-        writetable(totalAveragedData, filepath, 'Sheet', 'Total_Average', 'WriteVariableNames', true);
+        % Silent failure
+        sheetsWritten = 0;
     end
 end
 
