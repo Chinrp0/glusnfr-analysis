@@ -235,7 +235,7 @@ function success = generateTrialsPlot(organizedData, roiInfo, groupKey, outputFo
                 
                 % CONSISTENT: Use standardized stimulus marker (green line)
                 ylim(cfg.plotting.Y_LIMITS);
-                plot([stimulusTime_ms, stimulusTime_ms], cfg.plotting.Y_LIMITS, '-', 'Color', cfg.colors.STIMULUS, 'LineWidth', 1.0);
+                plot([stimulusTime_ms, stimulusTime_ms], cfg.plotting.Y_LIMITS, ':', 'Color', cfg.colors.STIMULUS, 'LineWidth', 1.0);
                 
                 title(sprintf('ROI %d (n=%d)', originalROI, trialCount), 'FontSize', 10, 'FontWeight', 'bold');
                 xlabel('Time (ms)', 'FontSize', 8);
@@ -357,7 +357,7 @@ function success = generateAveragedPlot(averagedData, roiInfo, groupKey, outputF
                     hasData = true;
                     
                     % Plot average trace
-                    h_line = plot(timeData_ms, avgData, 'k-', 'LineWidth', 2.0);
+                    h_line = plot(timeData_ms, avgData, 'k-', 'LineWidth', 1.0);
                     
                     if subplotIdx == 1
                         legendHandles(end+1) = h_line;
@@ -373,7 +373,7 @@ function success = generateAveragedPlot(averagedData, roiInfo, groupKey, outputF
                     if subplotIdx == 1 && isfinite(avgThreshold)
                         legendHandles(end+1) = plot(NaN, NaN, 'g--', 'LineWidth', 1.5);
                         legendLabels{end+1} = 'Threshold';
-                        legendHandles(end+1) = plot(NaN, NaN, '-', 'Color', cfg.colors.STIMULUS);
+                        legendHandles(end+1) = plot(NaN, NaN, ':', 'Color', cfg.colors.STIMULUS);
                         legendLabels{end+1} = 'Stimulus';
                     end
                 end
@@ -490,10 +490,10 @@ function success = generateCoverslipPlot(totalAveragedData, roiInfo, groupKey, o
         if hasData
             % CONSISTENT: Use line stimulus marker
             ylim(cfg.plotting.Y_LIMITS);
-            plot([stimulusTime_ms, stimulusTime_ms], cfg.plotting.Y_LIMITS, '-', 'Color', cfg.colors.STIMULUS, 'LineWidth', 1.0);
+            plot([stimulusTime_ms, stimulusTime_ms], cfg.plotting.Y_LIMITS, ':', 'Color', cfg.colors.STIMULUS, 'LineWidth', 1.0);
             
             % Add stimulus to legend
-            hStim = plot(NaN, NaN, '-', 'Color', cfg.colors.STIMULUS, 'LineWidth', 1.0);
+            hStim = plot(NaN, NaN, ':', 'Color', cfg.colors.STIMULUS, 'LineWidth', 1.0);
             legendHandles(end+1) = hStim;
             legendLabels{end+1} = 'Stimulus';
             

@@ -40,7 +40,7 @@ function config = getFigureConfig()
     config.properties = struct();
     config.properties.Visible = 'off';
     config.properties.Color = 'white';
-    config.properties.Renderer = 'vector';
+    config.properties.Renderer = 'painters';
     config.properties.PaperPositionMode = 'auto';
     
     % Optimized subplot margins
@@ -65,7 +65,7 @@ function config = getFigureConfig()
     config.lines.trace = 1.0;
     config.lines.threshold = 1.5;
     config.lines.stimulus = 1.0;
-    config.lines.average = 2.0;
+    config.lines.average = 1.0;
 end
 
 function fig = createStandardFigure(figureType, titleText, cfg)
