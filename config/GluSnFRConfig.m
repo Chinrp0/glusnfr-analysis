@@ -85,8 +85,8 @@ function config = GluSnFRConfig()
     config.output.CLEANUP_FAILED_FILES = true;            % Delete incomplete Excel files
     
     %% PLOTTING CONFIGURATION
-    %config.plotting = struct();
-    
+    config.plotting = struct();
+
     % ===== INDIVIDUAL PLOT TYPE CONTROLS =====
     config.plotting.ENABLE_INDIVIDUAL_TRIALS = true;
     config.plotting.ENABLE_ROI_AVERAGES = true; 
@@ -98,6 +98,15 @@ function config = GluSnFRConfig()
     % Save/layout settings only
     config.plotting.DPI = 300;
     config.plotting.MAX_PLOTS_PER_FIGURE = 12;
+        
+    % ===== PERFORMANCE CONTROLS =====
+    config.plotting.ENABLE_PARALLEL = true;               % Enable parallel plot generation
+    config.plotting.PARALLEL_THRESHOLD = 3;               % Min plots for parallel processing
+    config.plotting.MAX_CONCURRENT_PLOTS = 4;             % Max concurrent plot workers
+    config.plotting.USE_FAST_MODE = false;                % Fast mode: lower DPI, simplified
+    config.plotting.ENABLE_PLOT_CACHING = true;           % Cache layouts, colors, etc.
+    config.plotting.EARLY_EXIT_ON_NO_DATA = true;         % Skip plot creation if no data
+    
     
     %% File Patterns (cached regex patterns)
     config.patterns = struct();
