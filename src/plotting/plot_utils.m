@@ -142,13 +142,13 @@ function addStandardElements(timeData_ms, stimulusTime_ms, threshold, cfg, varar
             case 'line'
                 % Primary stimulus line
                 plot([stimulusTime_ms, stimulusTime_ms], cfg.plotting.Y_LIMITS, ...
-                     '-', 'Color', stimColor, 'LineWidth', stimWidth, 'HandleVisibility', 'off');
+                     ':', 'Color', stimColor, 'LineWidth', stimWidth, 'HandleVisibility', 'off');
                 
                 % ENHANCED: Add second stimulus for PPF with proper color
                 if ~isempty(p.Results.PPFTimepoint) && cfg.plotting.ENABLE_DUAL_STIMULI
                     stimulusTime_ms2 = stimulusTime_ms + p.Results.PPFTimepoint;
                     plot([stimulusTime_ms2, stimulusTime_ms2], cfg.plotting.Y_LIMITS, ...
-                         '-', 'Color', cfg.plotting.PPF_STIMULUS2_COLOR, ...
+                         ':', 'Color', cfg.plotting.PPF_STIMULUS2_COLOR, ...
                          'LineWidth', stimWidth, 'HandleVisibility', 'off');
                 end
                 
