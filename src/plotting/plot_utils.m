@@ -40,7 +40,7 @@ function config = getFigureConfig()
     config.properties = struct();
     config.properties.Visible = 'off';
     config.properties.Color = 'white';
-    config.properties.Renderer = 'painters';
+    config.properties.Renderer = 'vector';
     config.properties.PaperPositionMode = 'auto';
     
     % Optimized subplot margins
@@ -431,16 +431,16 @@ function success = savePlotWithFormat(fig, filepath, cfg, format)
         switch lower(format)
             case 'png'
                 if cfg.plotting.ENABLE_ANTIALIASING
-                    print(fig, filepath, '-dpng', sprintf('-r%d', dpi), '-painters');
+                    print(fig, filepath, '-dpng', sprintf('-r%d', dpi), '-vector');
                 else
-                    print(fig, filepath, '-dpng', sprintf('-r%d', dpi), '-painters', '-noui');
+                    print(fig, filepath, '-dpng', sprintf('-r%d', dpi), '-vector', '-noui');
                 end
                 
             case 'pdf'
-                print(fig, filepath, '-dpdf', '-painters');
+                print(fig, filepath, '-dpdf', '-vector');
                 
             case 'eps'
-                print(fig, filepath, '-depsc', '-painters');
+                print(fig, filepath, '-depsc', '-vector');
                 
             otherwise
                 error('Unsupported format: %s', format);
