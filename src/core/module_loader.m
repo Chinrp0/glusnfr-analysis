@@ -20,9 +20,10 @@ function modules = module_loader()
         modules.calc = df_calculator();
         modules.filter = roi_filter(); 
         
-        % Step 4: Load I/O and organization modules
+        % Step 4: Load I/O modules (UPDATED for split reader/writer)
         fprintf('  Loading I/O modules...\n');
-        modules.io = io_manager();
+        modules.io.reader = excel_reader();
+        modules.io.writer = excel_writer();
         modules.organize = data_organizer();
         modules.plot = plot_generator();
         
@@ -67,7 +68,7 @@ function validateAllModules(modules)
 end
 
 function testResults = runModuleTests(modules)
-    % Run quick functionality tests for each module
+    % Run quick functionality tests for each module (UPDATED for split IO)
     
     testResults = false(6, 1);
     
@@ -94,8 +95,11 @@ function testResults = runModuleTests(modules)
         assert(isfield(modules.filter, 'filterROIs'), 'Filter missing main function');
         testResults(5) = true;
         
-        % Test 6: I/O operations
-        assert(isfield(modules.io, 'writeExperimentResults'), 'IO missing consolidated function');
+        % Test 6: I/O operations (UPDATED for split reader/writer)
+        assert(isfield(modules.io, 'reader'), 'IO missing reader module');
+        assert(isfield(modules.io, 'writer'), 'IO missing writer module');
+        assert(isfield(modules.io.reader, 'readFile'), 'Reader missing readFile function');
+        assert(isfield(modules.io.writer, 'writeResults'), 'Writer missing writeResults function');
         testResults(6) = true;
         
     catch ME

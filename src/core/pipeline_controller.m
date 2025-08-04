@@ -100,7 +100,7 @@ function runMainPipeline()
         % Save comprehensive log
         totalTime = toc(globalTimer);
         logFileName = fullfile(fileparts(rawMeanFolder), sprintf('modular_pipeline_log_v%s.txt', version_info.version));
-        modules.io.saveLog(logBuffer, logFileName);
+        modules.io.writer.writeLog(logBuffer, logFileName);
         
         fprintf('\n=== PIPELINE COMPLETE ===\n');
         fprintf('Total processing time: %.2f seconds\n', totalTime);
@@ -120,10 +120,10 @@ function runMainPipeline()
             logBuffer{end+1} = sprintf('  %s at line %d', ME.stack(i).name, ME.stack(i).line);
         end
         
-        % Save error log
+        % Save error log (FIXED: Use new split IO structure)
         if exist('rawMeanFolder', 'var') && exist('modules', 'var')
             errorLogFile = fullfile(fileparts(rawMeanFolder), sprintf('error_log_v%s.txt', version_info.version));
-            modules.io.saveLog(logBuffer, errorLogFile);
+            modules.io.writer.writeLog(logBuffer, errorLogFile);
             fprintf('Error log saved to: %s\n', errorLogFile);
         end
         
@@ -244,7 +244,7 @@ function poolObj = setupParallelPool(hasGPU, gpuInfo)
 end
 
 function [rawMeanFolder, outputFolders, excelFiles, fileSystemLog] = setupFileSystem(io)
-    % Setup file system with comprehensive logging
+    % Setup file system with comprehensive logging (FIXED: Use new IO structure)
     
     fileSystemLog = {};
     fileSystemLog{end+1} = 'Setting up file system...';
@@ -292,7 +292,7 @@ function [rawMeanFolder, outputFolders, excelFiles, fileSystemLog] = setupFileSy
     directories = {outputFolders.main, outputFolders.plots_main, outputFolders.roi_trials, ...
                    outputFolders.roi_averages, outputFolders.coverslip_averages};
     
-    % Rest of function continues as before...
+    % Create directories
     for i = 1:length(directories)
         if ~exist(directories{i}, 'dir')
             mkdir(directories{i});
@@ -302,12 +302,12 @@ function [rawMeanFolder, outputFolders, excelFiles, fileSystemLog] = setupFileSy
         end
     end
     
-    % Get and validate Excel files with logging
+    % Get and validate Excel files with logging (FIXED: Use new reader)
     fileSystemLog{end+1} = 'Scanning for Excel files...';
     fprintf('Scanning for Excel files...\n');
     
     try
-        excelFiles = io.getExcelFiles(rawMeanFolder);
+        excelFiles = io.reader.getFiles(rawMeanFolder);
         
         fileSystemLog{end+1} = sprintf('Found %d valid Excel files (out of %d total)', length(excelFiles), length(excelFiles));
         fileSystemLog{end+1} = sprintf('Successfully found %d valid Excel files', length(excelFiles));
@@ -460,9 +460,9 @@ function [result, processingTime] = processGroup(groupIdx, groupKey, filesInGrou
             end
         end
         
-        % Save results
+        % Save results (FIXED: Use new writer)
         cfg = modules.config;
-        modules.io.writeExperimentResults(organizedData, averagedData, roiInfo, groupKey, outputFolders.main, cfg);
+        modules.io.writer.writeResults(organizedData, averagedData, roiInfo, groupKey, outputFolders.main, cfg);
         
         % Generate plots
         plotFolders = struct();
@@ -521,26 +521,26 @@ function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFol
 end
 
 function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMatrix, hasGPU, gpuInfo)
-    % Process single file (simplified for this logging update)
+    % Process single file (FIXED: Use new reader structure)
     
     fullFilePath = fullfile(fileInfo.folder, fileInfo.name);
     
     % Load configuration and modules
     cfg = GluSnFRConfig();
-    io = io_manager();
+    reader = excel_reader();
     calc = df_calculator();
     filter = roi_filter();
     utils = string_utils(cfg);
     
-    % Read file
-    [rawData, headers, readSuccess] = io.readExcelFile(fullFilePath, useReadMatrix);
+    % Read file (FIXED: Use new reader)
+    [rawData, headers, readSuccess] = reader.readFile(fullFilePath, useReadMatrix);
     
     if ~readSuccess || isempty(rawData)
         error('Failed to read file: %s', fileInfo.name);
     end
     
-    % Extract valid data
-    [validHeaders, validColumns] = io.extractValidHeaders(headers);
+    % Extract valid data (FIXED: Use new reader)
+    [validHeaders, validColumns] = reader.extractHeaders(headers);
     
     if isempty(validHeaders)
         error('No valid ROI headers found in %s', fileInfo.name);

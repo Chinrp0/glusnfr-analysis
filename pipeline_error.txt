@@ -1,8 +1,8 @@
 GluSnFR Pipeline Error Report
-Time: 31-Jul-2025 23:25:40
-Error: No groups processed successfully
+Time: 04-Aug-2025 11:33:18
+Error: ERROR getting Excel files: No Excel files found in folder: D:\Data\GluSnFR\Ms\2025-06-17_Ms-Hipp_DIV13_Doc2b_pilot_resave\iglu3fast_NGR\PPF\GPU_Processed_Images_PPF
 
 Stack Trace:
-  validateProcessingResults (line 649)
-  runMainPipeline (line 62)
+  setupFileSystem (line 326)
+  runMainPipeline (line 61)
   main_glusnfr_pipeline (line 28)

@@ -1,8 +1,7 @@
 GluSnFR Pipeline Error Report
-Time: 01-Aug-2025 18:25:38
-Error: Dimensions of arrays being concatenated are not consistent.
+Time: 04-Aug-2025 12:08:39
+Error: Unrecognized field name "saveLog".
 
 Stack Trace:
-  setupFileSystem (line 291)
-  runMainPipeline (line 61)
+  runMainPipeline (line 126)
   main_glusnfr_pipeline (line 28)
