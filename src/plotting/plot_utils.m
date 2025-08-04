@@ -170,7 +170,7 @@ function addStandardElements(timeData_ms, stimulusTime_ms, threshold, cfg, varar
             otherwise
                 % Default to line if unknown style
                 plot([stimulusTime_ms, stimulusTime_ms], cfg.plotting.Y_LIMITS, ...
-                     '-', 'Color', stimColor, 'LineWidth', stimWidth, 'HandleVisibility', 'off');
+                     ':', 'Color', stimColor, 'LineWidth', stimWidth, 'HandleVisibility', 'off');
         end
     end
     

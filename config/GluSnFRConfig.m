@@ -130,7 +130,7 @@ function config = GluSnFRConfig()
     config.plotting.AUTO_FIGURE_TYPE = true;              % Auto-select based on content
     
     % Original performance optimizations
-    config.plotting.RENDERER = 'painters';
+    config.plotting.RENDERER = 'vectors';
     config.plotting.FIGURE_VISIBLE = 'off';
     config.plotting.PRECOMPUTE_LAYOUTS = true;
     config.plotting.VECTORIZED_DATA_PREP = true;

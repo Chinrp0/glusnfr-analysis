@@ -236,7 +236,7 @@ function executeWriteTask(task)
 end
 
 function writeDataSheet(dataTable, filepath, sheetName, headerType, roiInfo)
-    % WRITEDATASHEET - Universal sheet writing with custom headers
+    % Keep the two-header functionality you had before
     
     try
         if strcmp(headerType, 'standard') || isempty(roiInfo)
