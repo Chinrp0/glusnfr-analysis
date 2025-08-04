@@ -1,6 +1,6 @@
 function utils = plot_utilities()
     % PLOT_UTILITIES - Centralized plotting utilities and configuration
-    % Simplified and standardized version of plot_utils.m
+    % Enhanced with improved threshold line styling
     
     utils.getPlotConfig = @getPlotConfig;
     utils.createFigure = @createFigure;
@@ -13,19 +13,19 @@ function utils = plot_utilities()
     utils.createLegend = @createLegend;
     utils.addStimulusToLegend = @addStimulusToLegend;
     utils.createTrialLegend = @createTrialLegend;
+    utils.getThresholdStyle = @getThresholdStyle;  % NEW: Get threshold styling
+    utils.determineNoiseLevel = @determineNoiseLevel;  % NEW: Determine noise level
 end
 
 function plotConfig = getPlotConfig(glusnfrConfig)
-    % Centralized plotting configuration
-    % Only pulls minimal save/timing settings from GluSnFRConfig
-    % All visual styling is self-contained here
+    % Centralized plotting configuration with enhanced threshold styling
     
     plotConfig = struct();
     
     % Only pull essential settings from main config
-    plotConfig.dpi = glusnfrConfig.plotting.DPI;  % Save setting
-    plotConfig.maxPlotsPerFigure = glusnfrConfig.plotting.MAX_PLOTS_PER_FIGURE;  % Layout setting
-    plotConfig.timing = glusnfrConfig.timing;  % Need stimulus timing
+    plotConfig.dpi = glusnfrConfig.plotting.DPI;
+    plotConfig.maxPlotsPerFigure = glusnfrConfig.plotting.MAX_PLOTS_PER_FIGURE;
+    plotConfig.timing = glusnfrConfig.timing;
     
     % All visual settings centralized here
     plotConfig.ylimits = [-0.02, 0.08];
@@ -49,12 +49,12 @@ function plotConfig = getPlotConfig(glusnfrConfig)
     plotConfig.lines = struct();
     plotConfig.lines.trace = 1.0;
     plotConfig.lines.threshold = 1.5;
-    plotConfig.lines.stimulus = 1.0;
+    plotConfig.lines.stimulus = 1.5;
     
     % Colors (all centralized here)
     plotConfig.colors = struct();
     plotConfig.colors.stimulus = [0, 0.8, 0];      % Green
-    plotConfig.colors.threshold = [0, 0.8, 0];     % Green
+    plotConfig.colors.threshold = [0, 0.8, 0];     % Green (for averages)
     plotConfig.colors.wt = [0, 0, 0];              % Black
     plotConfig.colors.r213w = [1, 0, 1];           % Magenta
     plotConfig.colors.lowNoise = [0.2, 0.6, 0.2];  % Green
@@ -62,27 +62,47 @@ function plotConfig = getPlotConfig(glusnfrConfig)
     plotConfig.colors.bothPeaks = [0, 0, 0];       % Black for both peaks
     plotConfig.colors.singlePeak = [0.8, 0.2, 0.2]; % Red for single peak
     
-    % Figure type controls (centralized here)
-    plotConfig.figureTypes = struct();
-    plotConfig.figureTypes.default = 'standard';    % 'standard', 'wide', 'compact'
-    plotConfig.figureTypes.ppf = 'wide';            % PPF plots use wide format
-    plotConfig.figureTypes.coverslip = 'standard';  % Coverslip plots
-    plotConfig.figureTypes.autoSelect = true;       % Auto-select based on content
-    
-    % Stimulus/threshold line settings (NEW - easy customization)
-    plotConfig.stimulus = struct();
-    plotConfig.stimulus.style = 'line';            % 'line', 'marker', 'pentagram'
-    plotConfig.stimulus.color = [0, 0.8, 0];       % Green
-    plotConfig.stimulus.width = 1.0;
-    plotConfig.stimulus.length = 'zero';           % 'full', 'zero', or [ymin, ymax]
-    plotConfig.stimulus.enableDual = true;         % Show both stimuli for PPF
-    plotConfig.stimulus.ppfColor = [0, 0.8, 0.8];  % Cyan for second stimulus
-    
+    % ENHANCED: Threshold styling by context
     plotConfig.threshold = struct();
-    plotConfig.threshold.color = [0, 0.8, 0];      % Green
-    plotConfig.threshold.width = 1.5;
-    plotConfig.threshold.style = '--';
-    plotConfig.threshold.length = 100;             % frames or 'all'
+    plotConfig.threshold.default = struct(...
+        'color', [0, 0.8, 0], ...      % Green for averages
+        'width', 1.5, ...
+        'style', '--', ...
+        'length', 150);
+    
+    plotConfig.threshold.lowNoise = struct(...
+        'color', 'match_trace', ...     % Match trace color
+        'width', 1.5, ...
+        'style', '--', ...              % Dashed for low noise
+        'length', 150);
+    
+    plotConfig.threshold.highNoise = struct(...
+        'color', 'match_trace', ...     % Match trace color
+        'width', 1.5, ...
+        'style', '-.', ...              % Dash-dot for high noise
+        'length', 150);
+    
+    plotConfig.threshold.average = struct(...
+        'color', [0, 0.8, 0], ...      % Keep green for averages
+        'width', 1.5, ...
+        'style', '--', ...
+        'length', 150);
+    
+    % Figure type controls
+    plotConfig.figureTypes = struct();
+    plotConfig.figureTypes.default = 'standard';
+    plotConfig.figureTypes.ppf = 'wide';
+    plotConfig.figureTypes.coverslip = 'standard';
+    plotConfig.figureTypes.autoSelect = true;
+    
+    % Stimulus line settings
+    plotConfig.stimulus = struct();
+    plotConfig.stimulus.style = 'line';
+    plotConfig.stimulus.color = [0, 0.8, 0];
+    plotConfig.stimulus.width = 1.0;
+    plotConfig.stimulus.length = 'zero';
+    plotConfig.stimulus.enableDual = true;
+    plotConfig.stimulus.ppfColor = [0, 0.8, 0.8];
 end
 
 function fig = createFigure(figureType, titleText, plotConfig)
@@ -148,21 +168,24 @@ function [nRows, nCols] = calculateLayout(nSubplots)
 end
 
 function addPlotElements(timeData_ms, stimulusTime_ms, threshold, plotConfig, varargin)
-    % Add standard plot elements (stimulus lines, threshold lines)
-    % This replaces the hard-coded elements with configurable ones
+    % ENHANCED: Add standard plot elements with flexible threshold styling
     
     % Parse optional inputs
     p = inputParser;
     addParameter(p, 'ShowStimulus', true, @islogical);
     addParameter(p, 'ShowThreshold', true, @islogical);
     addParameter(p, 'PPFTimepoint', [], @isnumeric);
+    addParameter(p, 'ThresholdStyle', 'default', @ischar);  % NEW: threshold style
+    addParameter(p, 'TraceColor', [], @isnumeric);          % NEW: trace color for matching
+    addParameter(p, 'NoiseLevel', 'unknown', @ischar);     % NEW: noise level
+    addParameter(p, 'PlotType', 'individual', @ischar);    % NEW: plot type (individual/average)
     parse(p, varargin{:});
     
     % Set y-limits first
     ylim(plotConfig.ylimits);
     currentYLim = ylim;
     
-    % Add stimulus line(s) with improved control
+    % Add stimulus line(s)
     if p.Results.ShowStimulus
         addStimulusLine(stimulusTime_ms, currentYLim, plotConfig.stimulus);
         
@@ -175,9 +198,63 @@ function addPlotElements(timeData_ms, stimulusTime_ms, threshold, plotConfig, va
         end
     end
     
-    % Add threshold line with improved control
+    % Add threshold line with enhanced styling
     if p.Results.ShowThreshold && isfinite(threshold)
-        addThresholdLine(timeData_ms, threshold, plotConfig.threshold);
+        thresholdStyle = getThresholdStyle(plotConfig, p.Results.PlotType, ...
+                                         p.Results.NoiseLevel, p.Results.TraceColor);
+        addThresholdLine(timeData_ms, threshold, thresholdStyle);
+    end
+end
+
+function thresholdStyle = getThresholdStyle(plotConfig, plotType, noiseLevel, traceColor)
+    % NEW: Get appropriate threshold styling based on context
+    
+    if strcmp(plotType, 'average') || strcmp(plotType, 'coverslip')
+        % For averages, always use green dashed line
+        thresholdStyle = plotConfig.threshold.average;
+        
+    elseif strcmp(noiseLevel, 'low')
+        % Low noise: dashed line matching trace color
+        thresholdStyle = plotConfig.threshold.lowNoise;
+        if ~isempty(traceColor) && isnumeric(traceColor) && length(traceColor) == 3
+            thresholdStyle.color = traceColor;
+        else
+            thresholdStyle.color = [0, 0, 0]; % Default to black
+        end
+        
+    elseif strcmp(noiseLevel, 'high')
+        % High noise: dash-dot line matching trace color
+        thresholdStyle = plotConfig.threshold.highNoise;
+        if ~isempty(traceColor) && isnumeric(traceColor) && length(traceColor) == 3
+            thresholdStyle.color = traceColor;
+        else
+            thresholdStyle.color = [0, 0, 0]; % Default to black
+        end
+        
+    else
+        % Default: use default styling
+        thresholdStyle = plotConfig.threshold.default;
+        if ~isempty(traceColor) && isnumeric(traceColor) && length(traceColor) == 3
+            thresholdStyle.color = traceColor;
+        end
+    end
+end
+
+function noiseLevel = determineNoiseLevel(threshold, config)
+    % NEW: Determine noise level from threshold value
+    
+    if nargin < 2
+        config = GluSnFRConfig();
+    end
+    
+    if isfinite(threshold)
+        if threshold <= config.thresholds.LOW_NOISE_CUTOFF
+            noiseLevel = 'low';
+        else
+            noiseLevel = 'high';
+        end
+    else
+        noiseLevel = 'unknown';
     end
 end
 
@@ -227,13 +304,13 @@ function addStimulusLine(stimulusTime_ms, currentYLim, stimConfig)
     end
 end
 
-function addThresholdLine(timeData_ms, threshold, threshConfig)
-    % Add threshold line with configurable appearance and length
+function addThresholdLine(timeData_ms, threshold, thresholdStyle)
+    % ENHANCED: Add threshold line with flexible styling
     
     % Determine x-range for threshold line
-    if isnumeric(threshConfig.length) && threshConfig.length > 0
-        if threshConfig.length <= length(timeData_ms)
-            xEnd = timeData_ms(threshConfig.length);
+    if isnumeric(thresholdStyle.length) && thresholdStyle.length > 0
+        if thresholdStyle.length <= length(timeData_ms)
+            xEnd = timeData_ms(thresholdStyle.length);
         else
             xEnd = timeData_ms(end);
         end
@@ -241,9 +318,16 @@ function addThresholdLine(timeData_ms, threshold, threshConfig)
         xEnd = timeData_ms(end); % Full length
     end
     
+    % Handle special color matching
+    plotColor = thresholdStyle.color;
+    if ischar(plotColor) && strcmp(plotColor, 'match_trace')
+        % This should have been resolved by getThresholdStyle, but fallback to black
+        plotColor = [0, 0, 0];
+    end
+    
     plot([timeData_ms(1), xEnd], [threshold, threshold], ...
-         threshConfig.style, 'Color', threshConfig.color, ...
-         'LineWidth', threshConfig.width, 'HandleVisibility', 'off');
+         thresholdStyle.style, 'Color', plotColor, ...
+         'LineWidth', thresholdStyle.width, 'HandleVisibility', 'off');
 end
 
 function formatSubplot(plotConfig)
@@ -398,8 +482,8 @@ function legendHandle = createTrialLegend(plotConfig, options)
     
     % Add threshold line if requested
     if options.IncludeThreshold
-        hThresh = plot(NaN, NaN, plotConfig.threshold.style, 'Color', plotConfig.threshold.color, ...
-            'LineWidth', plotConfig.threshold.width);
+        hThresh = plot(NaN, NaN, plotConfig.threshold.default.style, 'Color', plotConfig.threshold.default.color, ...
+            'LineWidth', plotConfig.threshold.default.width);
         handles(end+1) = hThresh;
         labels{end+1} = 'Threshold';
     end
@@ -424,12 +508,12 @@ function legendHandle = createNoiseLevelLegend(plotConfig, options)
     handles(end+1) = hHigh;
     labels{end+1} = 'High Noise';
     
-    hAll = plot(NaN, NaN, 'Color', [0.2, 0.2, 0.8], 'LineWidth', 2);
+    hAll = plot(NaN, NaN, 'Color', [0, 0, 0], 'LineWidth', 2);
     handles(end+1) = hAll;
     labels{end+1} = 'All ROIs';
     
     % Add stimulus line if requested
-    handles = addStimulusToLegend(handles, labels, plotConfig, options);
+    [handles, labels] = addStimulusToLegend(handles, labels, plotConfig, options);
     
     legendHandle = legend(handles, labels, 'Location', options.Location, 'FontSize', options.FontSize);
 end
@@ -474,8 +558,8 @@ function legendHandle = createBasicLegend(plotConfig, options)
     [handles, labels] = addStimulusToLegend(handles, labels, plotConfig, options);
     
     if options.IncludeThreshold
-        hThresh = plot(NaN, NaN, plotConfig.threshold.style, 'Color', plotConfig.threshold.color, ...
-            'LineWidth', plotConfig.threshold.width);
+        hThresh = plot(NaN, NaN, plotConfig.threshold.default.style, 'Color', plotConfig.threshold.default.color, ...
+            'LineWidth', plotConfig.threshold.default.width);
         handles(end+1) = hThresh;
         labels{end+1} = 'Threshold';
     end

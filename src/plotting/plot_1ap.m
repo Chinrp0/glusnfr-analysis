@@ -1,6 +1,5 @@
 function plot1AP = plot_1ap()
-    % PLOT_1AP - 1AP experiment plotting functions
-    % Standardized version of plot_1ap_generator.m
+    % PLOT_1AP - 1AP experiment plotting functions with per-trial threshold styling
     
     plot1AP.execute = @executePlotTask;
     plot1AP.generateTrials = @generateTrialsPlot;
@@ -40,7 +39,7 @@ function success = executePlotTask(task, config, varargin)
 end
 
 function success = generateTrialsPlot(organizedData, config, varargin)
-    % Generate individual trials plots with standardized signature
+    % Generate individual trials plots with per-trial threshold styling
     
     success = false;
     
@@ -89,7 +88,7 @@ function success = generateTrialsPlot(organizedData, config, varargin)
         for figNum = 1:numFigures
             success = generateTrialsFigure(figNum, numFigures, numROIs, organizedData, ...
                 roiInfo, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
-                cleanGroupKey, outputFolder, utils, plotConfig) || success;
+                cleanGroupKey, outputFolder, utils, plotConfig, config) || success;
         end
         
     catch ME
@@ -102,8 +101,8 @@ end
 
 function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedData, ...
     roiInfo, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
-    cleanGroupKey, outputFolder, utils, plotConfig)
-    % Generate a single trials figure
+    cleanGroupKey, outputFolder, utils, plotConfig, config)
+    % Generate a single trials figure with per-trial threshold styling
     
     success = false;
     
@@ -126,6 +125,9 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
         
         trialCount = 0;
         
+        % FIXED: Track noise levels for this subplot to show in title
+        noiseLevelsInPlot = {};
+        
         % Plot trials for this ROI
         for i = 1:length(uniqueTrials)
             trialNum = uniqueTrials(i);
@@ -138,29 +140,42 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
                     hasData = true;
                     
                     colorIdx = mod(i-1, size(trialColors, 1)) + 1;
-                    h_line = plot(timeData_ms, trialData, 'Color', trialColors(colorIdx, :), ...
+                    traceColor = trialColors(colorIdx, :);
+                    
+                    h_line = plot(timeData_ms, trialData, 'Color', traceColor, ...
                         'LineWidth', plotConfig.lines.trace);
                     h_line.Color(4) = plotConfig.transparency;
                     
-                    % Add threshold line for this trial
+                    % FIXED: Get threshold and determine noise level PER TRIAL
                     trialIdx = find(roiInfo.originalTrialNumbers == trialNum, 1);
                     if ~isempty(trialIdx) && roiIdx <= size(roiInfo.thresholds, 1) && ...
                        trialIdx <= size(roiInfo.thresholds, 2) && ...
                        isfinite(roiInfo.thresholds(roiIdx, trialIdx))
                         
                         threshold = roiInfo.thresholds(roiIdx, trialIdx);
+                        
+                        % FIXED: Determine noise level from THIS trial's threshold
+                        trialNoiseLevel = utils.determineNoiseLevel(threshold, config);
+                        noiseLevelsInPlot{end+1} = trialNoiseLevel;
+                        
+                        % Add threshold line with per-trial styling
                         utils.addPlotElements(timeData_ms, stimulusTime_ms, threshold, plotConfig, ...
-                            'ShowStimulus', false, 'ShowThreshold', true);
+                            'ShowStimulus', false, 'ShowThreshold', true, ...
+                            'PlotType', 'individual', 'NoiseLevel', trialNoiseLevel, ...
+                            'TraceColor', traceColor);
                     end
                 end
             end
         end
         
-        % Add stimulus line and formatting
+        % Add stimulus line (once per subplot)
         utils.addPlotElements(timeData_ms, stimulusTime_ms, NaN, plotConfig, ...
             'ShowStimulus', true, 'ShowThreshold', false);
         
-        title(sprintf('ROI %d (n=%d)', originalROI, trialCount), ...
+        % ENHANCED: Format title with noise level summary for this subplot
+        noiseLevelText = createNoiseLevelSummary(noiseLevelsInPlot);
+        
+        title(sprintf('ROI %d%s (n=%d)', originalROI, noiseLevelText, trialCount), ...
             'FontSize', plotConfig.fonts.subtitle, 'FontWeight', 'bold');
         utils.formatSubplot(plotConfig);
         
@@ -192,8 +207,38 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
     close(fig);
 end
 
+function noiseLevelText = createNoiseLevelSummary(noiseLevelsInPlot)
+    % NEW: Create noise level summary for subplot title
+    
+    noiseLevelText = '';
+    
+    if isempty(noiseLevelsInPlot)
+        return;
+    end
+    
+    % Count noise levels
+    lowCount = sum(strcmp(noiseLevelsInPlot, 'low'));
+    highCount = sum(strcmp(noiseLevelsInPlot, 'high'));
+    unknownCount = sum(strcmp(noiseLevelsInPlot, 'unknown'));
+    
+    % Create summary text
+    if lowCount > 0 && highCount > 0
+        % Mixed noise levels
+        noiseLevelText = sprintf(' (L:%d, H:%d)', lowCount, highCount);
+    elseif lowCount > 0 && highCount == 0
+        % All low noise
+        noiseLevelText = ' (Low)';
+    elseif highCount > 0 && lowCount == 0
+        % All high noise
+        noiseLevelText = ' (High)';
+    elseif unknownCount > 0
+        % Unknown noise levels
+        noiseLevelText = ' (?)';
+    end
+end
+
 function success = generateAveragesPlot(averagedData, config, varargin)
-    % Generate ROI averaged plots with standardized signature
+    % Generate ROI averaged plots with enhanced threshold styling
     
     success = false;
     
@@ -231,7 +276,7 @@ function success = generateAveragesPlot(averagedData, config, varargin)
         % Generate figures
         for figNum = 1:numFigures
             success = generateAveragesFigure(figNum, numFigures, avgVarNames, averagedData, ...
-                timeData_ms, stimulusTime_ms, cleanGroupKey, outputFolder, utils, plotConfig) || success;
+                timeData_ms, stimulusTime_ms, roiInfo, cleanGroupKey, outputFolder, utils, plotConfig) || success;
         end
         
     catch ME
@@ -243,8 +288,8 @@ function success = generateAveragesPlot(averagedData, config, varargin)
 end
 
 function success = generateAveragesFigure(figNum, numFigures, avgVarNames, averagedData, ...
-    timeData_ms, stimulusTime_ms, cleanGroupKey, outputFolder, utils, plotConfig)
-    % Generate a single averages figure
+    timeData_ms, stimulusTime_ms, roiInfo, cleanGroupKey, outputFolder, utils, plotConfig)
+    % Generate a single averages figure with enhanced threshold styling
     
     success = false;
     
@@ -270,19 +315,40 @@ function success = generateAveragesFigure(figNum, numFigures, avgVarNames, avera
         if ~all(isnan(avgData))
             hasData = true;
             
-            % Plot average trace
-            plot(timeData_ms, avgData, 'k-', 'LineWidth', plotConfig.lines.trace);
+            % Plot average trace in black
+            traceColor = [0, 0, 0]; % Black for averages
+            plot(timeData_ms, avgData, 'Color', traceColor, 'LineWidth', plotConfig.lines.trace);
             
-            % Calculate and add threshold
+            % Calculate and add threshold with AVERAGE styling (green)
             avgThreshold = calculateAverageThreshold(avgData, plotConfig);
-            utils.addPlotElements(timeData_ms, stimulusTime_ms, avgThreshold, plotConfig);
+            
+            % Use average plot type to get green threshold
+            utils.addPlotElements(timeData_ms, stimulusTime_ms, avgThreshold, plotConfig, ...
+                'ShowStimulus', true, 'ShowThreshold', true, ...
+                'PlotType', 'average', 'TraceColor', traceColor);
         end
         
         % Parse and format title
         roiMatch = regexp(varName, 'ROI(\d+)_n(\d+)', 'tokens');
         if ~isempty(roiMatch)
             originalROI = str2double(roiMatch{1}{1});
-            title(sprintf('ROI %d (n=%s)', originalROI, roiMatch{1}{2}), ...
+            
+            % For averages, show the predominant noise level for context
+            roiNoiseLevel = 'unknown';
+            if isKey(roiInfo.roiNoiseMap, originalROI)
+                roiNoiseLevel = roiInfo.roiNoiseMap(originalROI);
+            end
+            
+            noiseLevelText = '';
+            if strcmp(roiNoiseLevel, 'low')
+                noiseLevelText = ' (Avg-Low)';
+            elseif strcmp(roiNoiseLevel, 'high')
+                noiseLevelText = ' (Avg-High)';
+            else
+                noiseLevelText = ' (Avg)';
+            end
+            
+            title(sprintf('ROI %d%s (n=%s)', originalROI, noiseLevelText, roiMatch{1}{2}), ...
                 'FontSize', plotConfig.fonts.subtitle, 'FontWeight', 'bold');
         else
             title(varName, 'FontSize', plotConfig.fonts.subtitle);
@@ -312,7 +378,7 @@ function success = generateAveragesFigure(figNum, numFigures, avgVarNames, avera
 end
 
 function success = generateCoverslipPlot(totalAveragedData, config, varargin)
-    % Generate coverslip average plots with standardized signature
+    % Generate coverslip average plots (unchanged - no per-trial thresholds here)
     
     success = false;
     
@@ -373,7 +439,7 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
                     color = colors(2, :);
                     displayName = 'High Noise';
                 elseif contains(varName, 'All_')
-                    color = [0.2, 0.2, 0.8];
+                    color = [0, 0, 0];
                     displayName = 'All ROIs';
                 else
                     color = [0.4, 0.4, 0.4];
@@ -390,10 +456,11 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
             end
         end
         
-        % Add stimulus line and formatting
+        % Add stimulus line and formatting (no threshold for coverslips)
         if hasData
             utils.addPlotElements(timeData_ms, stimulusTime_ms, NaN, plotConfig, ...
-                'ShowStimulus', true, 'ShowThreshold', false);
+                'ShowStimulus', true, 'ShowThreshold', false, ...
+                'PlotType', 'coverslip');
             
             utils.formatSubplot(plotConfig);
             title(sprintf('%s - Coverslip Averages by Noise Level', cleanGroupKey), ...

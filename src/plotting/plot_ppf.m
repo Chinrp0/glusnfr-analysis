@@ -1,6 +1,5 @@
 function plotPPF = plot_ppf()
-    % PLOT_PPF - PPF experiment plotting functions
-    % Standardized version of plot_ppf_generator.m
+    % PLOT_PPF - PPF experiment plotting functions with enhanced threshold styling
     
     plotPPF.execute = @executePlotTask;
     plotPPF.generateIndividual = @generateIndividualPlot;
@@ -34,7 +33,7 @@ function success = executePlotTask(task, config, varargin)
 end
 
 function success = generateIndividualPlot(organizedData, config, varargin)
-    % Generate individual PPF plots by coverslip with standardized signature
+    % Generate individual PPF plots by coverslip with enhanced threshold styling
     
     success = false;
     
@@ -101,7 +100,7 @@ end
 
 function success = generateCoverslipIndividualPlots(plotData, csROIs, csCell, genotype, ...
     roiInfo, outputFolder, utils, plotConfig)
-    % Generate individual plots for one coverslip
+    % Generate individual plots for one coverslip with enhanced threshold styling
     
     success = false;
     
@@ -126,7 +125,7 @@ end
 
 function success = generateCoverslipFigure(figNum, numFigures, csROIs, plotData, csCell, ...
     genotype, roiInfo, timeData_ms, stimulusTime_ms1, outputFolder, utils, plotConfig)
-    % Generate a single coverslip figure
+    % Generate a single coverslip figure with enhanced threshold styling
     
     success = false;
     
@@ -152,7 +151,8 @@ function success = generateCoverslipFigure(figNum, numFigures, csROIs, plotData,
             hasData = true;
             
             % Determine trace color based on peak response type
-            if checkIfSinglePeakROI(varName, csCell, roiInfo)
+            isSinglePeak = checkIfSinglePeakROI(varName, csCell, roiInfo);
+            if isSinglePeak
                 traceColor = [0.8, 0.2, 0.2]; % Red for single peak
             else
                 traceColor = [0, 0, 0]; % Black for both peaks
@@ -160,10 +160,16 @@ function success = generateCoverslipFigure(figNum, numFigures, csROIs, plotData,
             
             plot(timeData_ms, traceData, 'Color', traceColor, 'LineWidth', plotConfig.lines.trace);
             
-            % Add threshold and stimulus markers
+            % Get threshold and noise level for this ROI
             threshold = getPPFROIThreshold(varName, roiInfo);
+            roiNoiseLevel = getPPFROINoiseLevel(varName, roiInfo, plotConfig);
+            
+            % ENHANCED: Add threshold and stimulus markers with enhanced styling
             utils.addPlotElements(timeData_ms, stimulusTime_ms1, threshold, plotConfig, ...
-                'PPFTimepoint', roiInfo.timepoint);
+                'ShowStimulus', true, 'ShowThreshold', true, ...
+                'PPFTimepoint', roiInfo.timepoint, ...
+                'PlotType', 'individual', 'NoiseLevel', roiNoiseLevel, ...
+                'TraceColor', traceColor);
         end
         
         % Format title
@@ -173,6 +179,15 @@ function success = generateCoverslipFigure(figNum, numFigures, csROIs, plotData,
             if checkIfSinglePeakROI(varName, csCell, roiInfo)
                 roiTitle = sprintf('%s (SP)', roiTitle);
             end
+            
+            % Add noise level indicator
+            roiNoiseLevel = getPPFROINoiseLevel(varName, roiInfo, plotConfig);
+            if strcmp(roiNoiseLevel, 'low')
+                roiTitle = sprintf('%s (Low)', roiTitle);
+            elseif strcmp(roiNoiseLevel, 'high')
+                roiTitle = sprintf('%s (High)', roiTitle);
+            end
+            
             title(roiTitle, 'FontSize', plotConfig.fonts.subtitle, 'FontWeight', 'bold');
         end
         
@@ -207,7 +222,7 @@ function success = generateCoverslipFigure(figNum, numFigures, csROIs, plotData,
 end
 
 function success = generateAveragedPlot(averagedData, config, varargin)
-    % Generate PPF averaged plots with standardized signature
+    % Generate PPF averaged plots with enhanced threshold styling
     
     success = false;
     
@@ -267,7 +282,7 @@ end
 function success = generateAveragedFigure(figNum, numFigures, avgVarNames, averagedData, ...
     timeData_ms, stimulusTime_ms1, genotype, plotSubtype, traceColor, ...
     roiInfo, cleanGroupKey, outputFolder, utils, plotConfig)
-    % Generate a single averaged figure
+    % Generate a single averaged figure with enhanced threshold styling
     
     success = false;
     
@@ -295,10 +310,14 @@ function success = generateAveragedFigure(figNum, numFigures, avgVarNames, avera
             
             plot(timeData_ms, avgData, 'Color', traceColor, 'LineWidth', 2.0);
             
-            % Add threshold and stimulus elements
+            % Calculate threshold for averaged data
             avgThreshold = calculatePPFAverageThreshold(avgData, plotConfig);
+            
+            % ENHANCED: Use average plot type to get green threshold for averages
             utils.addPlotElements(timeData_ms, stimulusTime_ms1, avgThreshold, plotConfig, ...
-                'PPFTimepoint', roiInfo.timepoint);
+                'ShowStimulus', true, 'ShowThreshold', true, ...
+                'PPFTimepoint', roiInfo.timepoint, ...
+                'PlotType', 'average', 'TraceColor', traceColor);
         end
         
         % Format title with genotype and plot type
@@ -441,6 +460,22 @@ function threshold = getPPFROIThreshold(varName, roiInfo)
         end
     catch
         threshold = NaN;
+    end
+end
+
+function noiseLevel = getPPFROINoiseLevel(varName, roiInfo, plotConfig)
+    % NEW: Get noise level for specific PPF ROI
+    
+    noiseLevel = 'unknown';
+    
+    try
+        threshold = getPPFROIThreshold(varName, roiInfo);
+        if isfinite(threshold)
+            utils = plot_utilities();
+            noiseLevel = utils.determineNoiseLevel(threshold, plotConfig);
+        end
+    catch
+        noiseLevel = 'unknown';
     end
 end
 
