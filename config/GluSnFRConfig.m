@@ -85,70 +85,19 @@ function config = GluSnFRConfig()
     config.output.CLEANUP_FAILED_FILES = true;            % Delete incomplete Excel files
     
     %% PLOTTING CONFIGURATION
-    config.plotting = struct();
-    
-    % Basic plotting parameters
-    config.plotting.MAX_PLOTS_PER_FIGURE = 12;
-    config.plotting.DPI = 300;
-    config.plotting.Y_LIMITS = [-0.02, 0.08];
-    config.plotting.TRANSPARENCY = 0.7;
+    %config.plotting = struct();
     
     % ===== INDIVIDUAL PLOT TYPE CONTROLS =====
-    config.plotting.ENABLE_INDIVIDUAL_TRIALS = true;      % ROI individual trials plots
-    config.plotting.ENABLE_ROI_AVERAGES = true;           % ROI averaged traces plots  
-    config.plotting.ENABLE_COVERSLIP_AVERAGES = true;     % Coverslip/population averages
-    config.plotting.ENABLE_PPF_INDIVIDUAL = true;         % PPF individual traces by coverslip
-    config.plotting.ENABLE_PPF_AVERAGED = true;           % PPF averaged plots
-    config.plotting.ENABLE_METADATA_PLOTS = false;        % Optional: QC/metadata plots
+    config.plotting.ENABLE_INDIVIDUAL_TRIALS = true;
+    config.plotting.ENABLE_ROI_AVERAGES = true; 
+    config.plotting.ENABLE_COVERSLIP_AVERAGES = true;
+    config.plotting.ENABLE_PPF_INDIVIDUAL = true;
+    config.plotting.ENABLE_PPF_AVERAGED = true;
+    config.plotting.ENABLE_METADATA_PLOTS = false;
     
-    % ===== PERFORMANCE CONTROLS =====
-    config.plotting.ENABLE_PARALLEL = true;               % Enable parallel plot generation
-    config.plotting.PARALLEL_THRESHOLD = 3;               % Min plots for parallel processing
-    config.plotting.MAX_CONCURRENT_PLOTS = 4;             % Max concurrent plot workers
-    config.plotting.USE_FAST_MODE = false;                % Fast mode: lower DPI, simplified
-    config.plotting.ENABLE_PLOT_CACHING = true;           % Cache layouts, colors, etc.
-    config.plotting.EARLY_EXIT_ON_NO_DATA = true;         % Skip plot creation if no data
-    
-    % ===== QUALITY CONTROLS =====
-    config.plotting.DPI_FAST = 150;                       % DPI for fast mode
-    config.plotting.DPI_STANDARD = 300;                   % DPI for standard mode
-    config.plotting.ENABLE_ANTIALIASING = true;           % Smooth lines (slower)
-    config.plotting.ENABLE_VECTOR_OUTPUT = false;         % Also save as PDF (slower)
-    config.plotting.OPTIMIZE_FOR_PRINT = false;           % Print-optimized settings
-    
-    % ===== STIMULUS MARKER CONFIGURATION =====
-    config.plotting.STIMULUS_MARKER_STYLE = 'line';       % 'line' or 'pentagram'
-    config.plotting.STIMULUS_COLOR = [0, 0.8, 0];         % Green stimulus line
-    config.plotting.STIMULUS_WIDTH = 1.0;                 % Line width
-    config.plotting.ENABLE_DUAL_STIMULI = true;           % Show both stimuli for PPF
-    config.plotting.PPF_STIMULUS2_COLOR = [0, 0.8, 0.8];  % Cyan for second stimulus
-    
-    % ===== FIGURE TYPE CONTROLS =====
-    config.plotting.DEFAULT_FIGURE_TYPE = 'standard';     % 'standard', 'wide', 'compact'
-    config.plotting.PPF_FIGURE_TYPE = 'wide';             % PPF plots use wide format
-    config.plotting.COVERSLIP_FIGURE_TYPE = 'standard';   % Coverslip plots
-    config.plotting.AUTO_FIGURE_TYPE = true;              % Auto-select based on content
-    
-    % Original performance optimizations
-    config.plotting.RENDERER = 'painters';
-    config.plotting.FIGURE_VISIBLE = 'off';
-    config.plotting.PRECOMPUTE_LAYOUTS = true;
-    config.plotting.VECTORIZED_DATA_PREP = true;
-    config.plotting.CLOSE_FIGURES_IMMEDIATELY = true;
-    config.plotting.OPTIMIZE_LINE_OBJECTS = true;
-    config.plotting.REDUCE_PLOT_RESOLUTION = false;
-    
-    %% Colors (enhanced)
-    config.colors = struct();
-    config.colors.STIMULUS = config.plotting.STIMULUS_COLOR;
-    config.colors.THRESHOLD = [0, 0.8, 0];
-    config.colors.WT = [0, 0, 0];
-    config.colors.R213W = [1, 0, 1];
-    % Additional color schemes
-    config.colors.LOW_NOISE = [0.2, 0.6, 0.2];           % Green for low noise
-    config.colors.HIGH_NOISE = [0.8, 0.2, 0.2];          % Red for high noise
-    config.colors.BOTH_PEAKS = [0, 0, 0];                % Black for both peaks
-    config.colors.SINGLE_PEAK = [0.8, 0.2, 0.2];         % Red for single peak
+    % Save/layout settings only
+    config.plotting.DPI = 300;
+    config.plotting.MAX_PLOTS_PER_FIGURE = 12;
     
     %% File Patterns (cached regex patterns)
     config.patterns = struct();

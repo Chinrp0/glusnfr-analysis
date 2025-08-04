@@ -25,7 +25,7 @@ function modules = module_loader()
         modules.io.reader = excel_reader();
         modules.io.writer = excel_writer();
         modules.organize = data_organizer();
-        modules.plot = plot_generator();
+        modules.plot = plot_controller();
         
         % Step 5: Load analysis and controller
         fprintf('  Loading analysis modules...\n');
@@ -70,7 +70,7 @@ end
 function testResults = runModuleTests(modules)
     % Run quick functionality tests for each module (UPDATED for split IO)
     
-    testResults = false(6, 1);
+    testResults = false(7, 1);
     
     try
         % Test 1: Configuration
@@ -101,6 +101,11 @@ function testResults = runModuleTests(modules)
         assert(isfield(modules.io.reader, 'readFile'), 'Reader missing readFile function');
         assert(isfield(modules.io.writer, 'writeResults'), 'Writer missing writeResults function');
         testResults(6) = true;
+
+        % Test 7: Plot controller (NEW)
+        assert(isfield(modules.plot, 'generateGroupPlots'), 'Plot controller missing main function');
+        assert(isfield(modules.plot, 'shouldUseParallel'), 'Plot controller missing parallel function');
+        testResults(7) = true;
         
     catch ME
         fprintf('Module test failed: %s', ME.message);
