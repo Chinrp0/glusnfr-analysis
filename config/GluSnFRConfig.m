@@ -24,6 +24,9 @@ function config = GluSnFRConfig()
     config.thresholds.HIGH_NOISE_MULTIPLIER = 1.5;
     config.thresholds.DEFAULT_THRESHOLD = 0.02;
     config.thresholds.MIN_F0 = 1e-6;
+
+    config.thresholds.SCHMITT_LOWER_MULTIPLIER = 0.33;  % More lenient (1σ instead of 1.5σ)
+
     
     %% Filtering Parameters
     config.filtering = struct();

@@ -129,7 +129,7 @@ function plot_summary_comparison(results)
 end
 
 function plot_removed_rois(results, dF_values, headers, timeData_ms, stimTime_ms, thresholds)
-    % Plot ROIs that were removed by Schmitt trigger
+    % Plot ROIs that were removed by Schmitt trigger with enhanced visualization
     
     removed_rois = results.comparison.current_only;
     num_to_plot = min(12, length(removed_rois));
@@ -155,12 +155,15 @@ function plot_removed_rois(results, dF_values, headers, timeData_ms, stimTime_ms
         trace = dF_values(:, roi_idx);
         threshold = thresholds(roi_idx);
         
+        % Standardized y-axis limits
+        ylim([-0.02, 0.04]);
+        
         % Plot trace
         plot(timeData_ms, trace, 'b-', 'LineWidth', 1.5);
         hold on;
         
-        % Plot stimulus
-        plot([stimTime_ms, stimTime_ms], ylim, 'g--', 'LineWidth', 1, 'DisplayName', 'Stimulus');
+        % Plot stimulus line with max at y=0.05
+        plot([stimTime_ms, stimTime_ms], [-0.04, 0.05], 'g--', 'LineWidth', 1, 'DisplayName', 'Stimulus');
         
         % Plot current method threshold (3σ)
         plot(xlim, [threshold, threshold], 'r--', 'LineWidth', 1, 'DisplayName', 'Current (3σ)');
@@ -180,7 +183,7 @@ function plot_removed_rois(results, dF_values, headers, timeData_ms, stimTime_ms
         plot(xlim, [upper_thresh, upper_thresh], 'm--', 'LineWidth', 1, 'DisplayName', 'Schmitt Upper');
         plot(xlim, [lower_thresh, lower_thresh], 'c--', 'LineWidth', 1, 'DisplayName', 'Schmitt Lower');
         
-        % Analyze why this ROI was removed
+        % Analyze why this ROI was removed with enhanced details
         schmitt_filter = schmitt_trigger_filter();
         [passes, details] = schmitt_filter.applySchmittTrigger(trace, upper_thresh, lower_thresh, ...
                                                              results.experimentType, [], cfg);
@@ -189,7 +192,20 @@ function plot_removed_rois(results, dF_values, headers, timeData_ms, stimTime_ms
         if ~details.triggered
             reason = 'No trigger';
         elseif details.valid_signals == 0
-            reason = sprintf('%d invalid signals', details.invalid_signals);
+            if details.invalid_signals > 0
+                reason = sprintf('%d brief signals (<%dms)', details.invalid_signals, 2*5); % 2 frames * 5ms
+            else
+                reason = 'No valid signals';
+            end
+        end
+        
+        % Add max response info for debugging
+        stimFrame = cfg.timing.STIMULUS_FRAME;
+        postStimWindow = stimFrame + (1:30);
+        postStimWindow = postStimWindow(postStimWindow <= length(trace));
+        if ~isempty(postStimWindow)
+            maxResp = max(trace(postStimWindow));
+            reason = sprintf('%s (max=%.3f)', reason, maxResp);
         end
         
         title(sprintf('ROI %d - REMOVED (%s noise)\n%s', roi_num, noise_label, reason), ...
@@ -210,7 +226,7 @@ function plot_removed_rois(results, dF_values, headers, timeData_ms, stimTime_ms
 end
 
 function plot_added_rois(results, dF_values, headers, timeData_ms, stimTime_ms, thresholds)
-    % Plot ROIs that were added by Schmitt trigger
+    % Plot ROIs that were added by Schmitt trigger with enhanced visualization
     
     added_rois = results.comparison.schmitt_only;
     num_to_plot = min(12, length(added_rois));
@@ -236,12 +252,15 @@ function plot_added_rois(results, dF_values, headers, timeData_ms, stimTime_ms, 
         trace = dF_values(:, roi_idx);
         threshold = thresholds(roi_idx);
         
+        % Standardized y-axis limits
+        ylim([-0.02, 0.04]);
+        
         % Plot trace
         plot(timeData_ms, trace, 'b-', 'LineWidth', 1.5);
         hold on;
         
-        % Plot stimulus
-        plot([stimTime_ms, stimTime_ms], ylim, 'g--', 'LineWidth', 1, 'DisplayName', 'Stimulus');
+        % Plot stimulus line with max at y=0
+        plot([stimTime_ms, stimTime_ms], [-0.02, 0], 'g--', 'LineWidth', 1, 'DisplayName', 'Stimulus');
         
         % Plot current method threshold (3σ)
         plot(xlim, [threshold, threshold], 'r--', 'LineWidth', 1, 'DisplayName', 'Current (3σ)');
@@ -262,7 +281,15 @@ function plot_added_rois(results, dF_values, headers, timeData_ms, stimTime_ms, 
         plot(xlim, [lower_thresh, lower_thresh], 'c--', 'LineWidth', 1, 'DisplayName', 'Schmitt Lower');
         
         % Analyze why this ROI was added
-        max_response = max(trace(cfg.timing.STIMULUS_FRAME+1:min(cfg.timing.STIMULUS_FRAME+50, end)));
+        cfg = GluSnFRConfig();
+        stimFrame = cfg.timing.STIMULUS_FRAME;
+        postStimWindow = stimFrame + (1:30);
+        postStimWindow = postStimWindow(postStimWindow <= length(trace));
+        if ~isempty(postStimWindow)
+            max_response = max(trace(postStimWindow));
+        else
+            max_response = 0;
+        end
         current_passes = max_response > threshold;
         
         reason = '';
@@ -287,8 +314,9 @@ function plot_added_rois(results, dF_values, headers, timeData_ms, stimTime_ms, 
             'FontSize', 14, 'FontWeight', 'bold', 'Color', 'blue');
 end
 
+
 function plot_schmitt_trigger_examples(results, dF_values, headers, timeData_ms, stimTime_ms, thresholds)
-    % Plot examples showing Schmitt trigger logic in action
+    % Plot examples showing Schmitt trigger logic in action with enhanced visualization
     
     % Find good examples: some that pass, some that fail
     all_rois = 1:min(50, size(dF_values, 2)); % Look at first 50 ROIs
@@ -354,6 +382,9 @@ function plot_schmitt_trigger_examples(results, dF_values, headers, timeData_ms,
         trace = dF_values(:, roi_idx);
         threshold = thresholds(roi_idx);
         
+        % Standardized y-axis limits
+        ylim([-0.02, 0.04]);
+        
         % Calculate Schmitt thresholds
         if threshold <= cfg.thresholds.LOW_NOISE_CUTOFF
             upper_thresh = threshold;
@@ -373,8 +404,8 @@ function plot_schmitt_trigger_examples(results, dF_values, headers, timeData_ms,
         plot(xlim, [upper_thresh, upper_thresh], 'm--', 'LineWidth', 2, 'DisplayName', 'Upper (Trigger)');
         plot(xlim, [lower_thresh, lower_thresh], 'c--', 'LineWidth', 2, 'DisplayName', 'Lower (Reset)');
         
-        % Plot stimulus
-        plot([stimTime_ms, stimTime_ms], ylim, 'g--', 'LineWidth', 1.5, 'DisplayName', 'Stimulus');
+        % Plot stimulus line with max at y=0
+        plot([stimTime_ms, stimTime_ms], [-0.02, 0], 'g--', 'LineWidth', 1.5, 'DisplayName', 'Stimulus');
         
         % Analyze and highlight trigger points
         [passes, details] = schmitt_filter.applySchmittTrigger(trace, upper_thresh, lower_thresh, ...
@@ -417,6 +448,146 @@ function plot_schmitt_trigger_examples(results, dF_values, headers, timeData_ms,
     end
     
     sgtitle('Schmitt Trigger Logic Examples', 'FontSize', 14, 'FontWeight', 'bold');
+end
+
+function inspect_specific_rois(results, roi_numbers, dF_values, headers, timeData_ms, stimTime_ms, thresholds)
+    % NEW FUNCTION: Inspect specific ROIs of interest
+    % Usage: inspect_specific_rois(results, [5, 18, 19], dF_values, headers, timeData_ms, stimTime_ms, thresholds)
+    
+    if isempty(roi_numbers)
+        fprintf('No ROIs specified for inspection.\n');
+        return;
+    end
+    
+    cfg = GluSnFRConfig();
+    schmitt_filter = schmitt_trigger_filter();
+    
+    % Check which ROIs were removed vs kept
+    current_rois = extractROINumbers(results.current.rois);
+    schmitt_rois = extractROINumbers(results.schmitt.rois);
+    
+    figure('Position', [100, 100, 1600, 1000], 'Name', 'Specific ROI Inspection');
+    
+    num_rois = length(roi_numbers);
+    [nRows, nCols] = calculate_subplot_layout(num_rois);
+    
+    for i = 1:num_rois
+        roi_num = roi_numbers(i);
+        roi_idx = find_roi_index(headers, roi_num);
+        
+        if isempty(roi_idx)
+            fprintf('ROI %d not found in headers.\n', roi_num);
+            continue;
+        end
+        
+        subplot(nRows, nCols, i);
+        
+        trace = dF_values(:, roi_idx);
+        threshold = thresholds(roi_idx);
+        
+        % Standardized y-axis limits
+        ylim([-0.02, 0.04]);
+        
+        % Plot trace
+        plot(timeData_ms, trace, 'b-', 'LineWidth', 2);
+        hold on;
+        
+        % Plot stimulus line with max at y=0
+        plot([stimTime_ms, stimTime_ms], [-0.02, 0], 'g--', 'LineWidth', 1.5, 'DisplayName', 'Stimulus');
+        
+        % Calculate thresholds
+        if threshold <= cfg.thresholds.LOW_NOISE_CUTOFF
+            upper_thresh = threshold;
+            lower_thresh = threshold * 0.5;
+            noise_label = 'Low';
+        else
+            upper_thresh = threshold * 1.5;
+            lower_thresh = threshold * 0.5;
+            noise_label = 'High';
+        end
+        
+        % Plot thresholds
+        plot(xlim, [threshold, threshold], 'r--', 'LineWidth', 1.5, 'DisplayName', 'Current (3σ)');
+        plot(xlim, [upper_thresh, upper_thresh], 'm--', 'LineWidth', 1.5, 'DisplayName', 'Schmitt Upper');
+        plot(xlim, [lower_thresh, lower_thresh], 'c--', 'LineWidth', 1.5, 'DisplayName', 'Schmitt Lower');
+        
+        % Analyze both methods
+        % Current method
+        stimFrame = cfg.timing.STIMULUS_FRAME;
+        postStimWindow = stimFrame + (1:30);
+        postStimWindow = postStimWindow(postStimWindow <= length(trace));
+        if ~isempty(postStimWindow)
+            max_response = max(trace(postStimWindow));
+        else
+            max_response = 0;
+        end
+        current_passes = max_response > threshold;
+        
+        % Schmitt method
+        [schmitt_passes, details] = schmitt_filter.applySchmittTrigger(trace, upper_thresh, lower_thresh, ...
+                                                                     results.experimentType, [], cfg);
+        
+        % Determine status
+        in_current = ismember(roi_num, current_rois);
+        in_schmitt = ismember(roi_num, schmitt_rois);
+        
+        if in_current && in_schmitt
+            status = 'BOTH PASS';
+            color = 'green';
+        elseif in_current && ~in_schmitt
+            status = 'REMOVED by Schmitt';
+            color = 'red';
+        elseif ~in_current && in_schmitt
+            status = 'ADDED by Schmitt';
+            color = 'blue';
+        else
+            status = 'BOTH FAIL';
+            color = 'black';
+        end
+        
+        % Add detailed analysis
+        analysis = sprintf('Max resp: %.3f | Triggered: %s | Valid: %d | Invalid: %d', ...
+                          max_response, logical2str(details.triggered), ...
+                          details.valid_signals, details.invalid_signals);
+        
+        title(sprintf('ROI %d - %s (%s noise)\n%s', roi_num, status, noise_label, analysis), ...
+              'FontSize', 10, 'Color', color);
+        xlabel('Time (ms)');
+        ylabel('ΔF/F');
+        
+        if i == 1
+            legend('Location', 'northeast', 'FontSize', 8);
+        end
+        
+        grid on;
+        hold off;
+    end
+    
+    sgtitle('Specific ROI Inspection', 'FontSize', 14, 'FontWeight', 'bold');
+end
+
+function str = logical2str(val)
+    if val
+        str = 'YES';
+    else
+        str = 'NO';
+    end
+end
+
+function roi_numbers = extractROINumbers(rois)
+    % Helper function to extract ROI numbers from various formats
+    if iscell(rois)
+        roi_numbers = [];
+        for i = 1:length(rois)
+            matches = regexp(rois{i}, 'ROI[_\s]*(\d+)', 'tokens', 'ignorecase');
+            if ~isempty(matches)
+                roi_numbers(end+1) = str2double(matches{1}{1});
+            end
+        end
+    else
+        roi_numbers = rois; % Assume already numeric
+    end
+    roi_numbers = sort(roi_numbers);
 end
 
 function [nRows, nCols] = calculate_subplot_layout(n)

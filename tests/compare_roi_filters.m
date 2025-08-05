@@ -6,13 +6,22 @@ function results = compare_roi_filters(filepath)
     %
     % Usage:
     %   results = compare_roi_filters(filepath)
-    %   results = compare_roi_filters()  % Opens file dialog
+    %   results = compare_roi_filters()  % Opens file dialog with default path
     %
     % Returns:
     %   results - Structure containing comparison data and statistics
     
     if nargin < 1 || isempty(filepath)
-        [filename, pathname] = uigetfile('*.xlsx', 'Select Excel file for ROI filter comparison');
+        % Set your default path here
+        default_path = 'D:\Data\GluSnFR\Ms\2025-06-17_Ms-Hipp_DIV13_Doc2b_pilot_resave\iglu3fast_NGR\1AP\GPU_Processed_Images_1AP\5_raw_mean\';
+        
+        % Check if default path exists, if not fall back to current directory
+        if ~exist(default_path, 'dir')
+            warning('Default path does not exist: %s\nUsing current directory instead.', default_path);
+            default_path = pwd;
+        end
+        
+        [filename, pathname] = uigetfile('*.xlsx', 'Select Excel file for ROI filter comparison', default_path);
         if isequal(filename, 0)
             fprintf('No file selected, exiting...\n');
             results = [];

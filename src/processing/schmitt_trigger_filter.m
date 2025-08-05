@@ -74,12 +74,21 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
 end
 
 function [noiseClassification, upperThresholds, lowerThresholds] = calculateSchmittThresholds(baseThresholds, cfg)
-    % Calculate upper and lower thresholds for Schmitt trigger
+    % IMPROVED: Calculate thresholds with option for more lenient lower threshold
     
     n_rois = length(baseThresholds);
     noiseClassification = cell(n_rois, 1);
     upperThresholds = zeros(n_rois, 1);
     lowerThresholds = zeros(n_rois, 1);
+    
+    % IMPROVEMENT 5: More lenient lower threshold option
+    % Previous: always 0.5 (1.5σ)
+    % New: configurable, default to more lenient 0.33 (1σ)
+    if isfield(cfg.thresholds, 'SCHMITT_LOWER_MULTIPLIER')
+        lower_multiplier = cfg.thresholds.SCHMITT_LOWER_MULTIPLIER;
+    else
+        lower_multiplier = 0.33;  % 1σ instead of 1.5σ - more lenient
+    end
     
     for i = 1:n_rois
         threshold = baseThresholds(i);
@@ -87,26 +96,27 @@ function [noiseClassification, upperThresholds, lowerThresholds] = calculateSchm
         % Classify noise level
         if threshold <= cfg.thresholds.LOW_NOISE_CUTOFF
             noiseClassification{i} = 'low';
-            % Low noise: 3σ upper, 1.5σ lower
+            % Low noise: 3σ upper, 1σ lower (more lenient)
             upperThresholds(i) = threshold;  % Already 3σ from dF/F calculation
-            lowerThresholds(i) = threshold * 0.5;  % 1.5σ = 3σ * 0.5
+            lowerThresholds(i) = threshold * lower_multiplier;  % More lenient lower threshold
         else
             noiseClassification{i} = 'high';
-            % High noise: 4.5σ upper, 1.5σ lower  
-            upperThresholds(i) = threshold * 1.5;  % 4.5σ = 3σ * 1.5
-            lowerThresholds(i) = threshold * 0.5;  % 1.5σ = 3σ * 0.5
+            % High noise: 4.0σ upper, 1σ lower (more lenient)
+            upperThresholds(i) = threshold * 1.333;  % 4.0σ = 3σ * 1.333
+            lowerThresholds(i) = threshold * lower_multiplier;  % More lenient lower threshold
         end
     end
 end
 
 function [passes, details] = applySchmittTrigger(trace, upperThreshold, lowerThreshold, experimentType, timepoint_ms, cfg)
-    % Apply Schmitt trigger logic to single ROI trace
+    % IMPROVED: Apply Schmitt trigger logic with reduced false negatives
     
     details = struct();
     details.triggered = false;
     details.valid_signals = 0;
     details.invalid_signals = 0;
     details.signal_durations = [];
+    details.debug_info = struct(); % For debugging
     
     % Define stimulus frames
     stimFrame1 = cfg.timing.STIMULUS_FRAME;
@@ -137,41 +147,55 @@ function [passes, details] = applySchmittTrigger(trace, upperThreshold, lowerThr
     % Convert back to original trace indices
     upper_crossings = search_windows(upper_crossings);
     details.triggered = true;
+    details.debug_info.upper_crossings = upper_crossings;
     
-    % For each upper threshold crossing, check if signal is valid
+    % IMPROVEMENT 1: More lenient signal duration criteria
+    % Previous: signal_duration <= 1 frame was invalid
+    % New: Use different criteria based on signal characteristics
+    
+    % IMPROVEMENT 2: Consider signal shape and decay pattern
+    % Real calcium signals typically have:
+    % - Fast rise (1-2 frames)
+    % - Slower decay (exponential-like)
+    % - Duration of 10-100ms (2-20 frames)
+    
     valid_signals = 0;
     
     for i = 1:length(upper_crossings)
         crossing_frame = upper_crossings(i);
         
-        % Find when signal decays below lower threshold
+        % IMPROVEMENT 3: Adaptive decay analysis window
+        % Use shorter window for initial analysis (50 frames = 250ms)
         decay_search_start = crossing_frame + 1;
-        decay_search_end = min(crossing_frame + 100, length(trace)); % Search up to 100 frames (500ms)
+        decay_search_end = min(crossing_frame + 50, length(trace)); % Reduced from 100 to 50
         
         if decay_search_start > length(trace)
             continue; % Can't analyze decay if at end of trace
         end
         
-        % Find first frame where signal drops below lower threshold
+        % Find when signal decays below lower threshold
         below_lower = find(trace(decay_search_start:decay_search_end) < lowerThreshold, 1);
         
         if isempty(below_lower)
-            % Signal never decays below lower threshold - valid signal
+            % Signal never decays below lower threshold - likely valid signal
             signal_duration = decay_search_end - crossing_frame;
             valid_signals = valid_signals + 1;
             details.signal_durations(end+1) = signal_duration;
+            
         else
             % Signal decays below lower threshold
             decay_frame = decay_search_start + below_lower - 1;
             signal_duration = decay_frame - crossing_frame;
             
-            if signal_duration <= 1
-                % Signal decays within 1 frame (5ms) - invalid
-                details.invalid_signals = details.invalid_signals + 1;
-            else
-                % Signal lasts more than 1 frame - valid
+            % IMPROVEMENT 4: More sophisticated validation criteria
+            is_valid = validate_signal_characteristics(trace, crossing_frame, decay_frame, ...
+                                                     upperThreshold, lowerThreshold, cfg);
+            
+            if is_valid
                 valid_signals = valid_signals + 1;
                 details.signal_durations(end+1) = signal_duration;
+            else
+                details.invalid_signals = details.invalid_signals + 1;
             end
         end
     end
@@ -181,6 +205,78 @@ function [passes, details] = applySchmittTrigger(trace, upperThreshold, lowerThr
     % ROI passes if it has at least one valid signal
     passes = valid_signals > 0;
 end
+
+function is_valid = validate_signal_characteristics(trace, crossing_frame, decay_frame, upperThreshold, lowerThreshold, cfg)
+    % IMPROVEMENT 4: Enhanced signal validation logic
+    
+    signal_duration = decay_frame - crossing_frame;
+    
+    % Criterion 1: Minimum duration (more lenient than before)
+    % Previous: duration > 1 frame (5ms)
+    % New: duration > 0 frames BUT with additional quality checks
+    if signal_duration <= 0
+        is_valid = false;
+        return;
+    end
+    
+    % Criterion 2: Signal amplitude and shape analysis
+    signal_window = crossing_frame:decay_frame;
+    if signal_window(end) > length(trace)
+        signal_window = signal_window(signal_window <= length(trace));
+    end
+    
+    if length(signal_window) < 2
+        is_valid = false;
+        return;
+    end
+    
+    signal_trace = trace(signal_window);
+    
+    % Criterion 3: Peak amplitude check
+    peak_amplitude = max(signal_trace);
+    if peak_amplitude < upperThreshold * 1.1  % Peak should be meaningfully above threshold
+        is_valid = false;
+        return;
+    end
+    
+    % Criterion 4: Signal shape check - should have reasonable decay
+    % For very short signals (1-2 frames), be more permissive
+    if signal_duration <= 2
+        % For very short signals, just check if they're above a reasonable amplitude
+        is_valid = peak_amplitude >= upperThreshold;
+        return;
+    end
+    
+    % Criterion 5: For longer signals, check decay pattern
+    % Real calcium signals should show some decay, not just noise
+    first_half = signal_trace(1:ceil(length(signal_trace)/2));
+    second_half = signal_trace(ceil(length(signal_trace)/2)+1:end);
+    
+    if ~isempty(first_half) && ~isempty(second_half)
+        mean_first = mean(first_half);
+        mean_second = mean(second_half);
+        
+        % Signal should generally decay (first half > second half)
+        % But allow some tolerance for noise
+        decay_ratio = mean_second / mean_first;
+        if decay_ratio > 1.5  % Signal increases too much - likely noise
+            is_valid = false;
+            return;
+        end
+    end
+    
+    % Criterion 6: Check for excessive noise within signal
+    signal_noise = std(signal_trace);
+    signal_mean = mean(signal_trace);
+    if signal_noise > signal_mean * 0.5 && signal_duration < 5  % Very noisy short signals
+        is_valid = false;
+        return;
+    end
+    
+    % If we get here, signal passes all criteria
+    is_valid = true;
+end
+
 
 function stats = generateSchmittStats(headers, schmittMask, noiseClassification, schmitt_details, experimentType, cfg)
     % Generate comprehensive statistics for Schmitt trigger filtering
