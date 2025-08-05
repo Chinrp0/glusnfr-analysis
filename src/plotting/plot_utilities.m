@@ -168,17 +168,18 @@ function [nRows, nCols] = calculateLayout(nSubplots)
 end
 
 function addPlotElements(timeData_ms, stimulusTime_ms, threshold, plotConfig, varargin)
-    % ENHANCED: Add standard plot elements with flexible threshold styling
+    % OPTIMIZED: Use pre-calculated noise levels and thresholds
     
     % Parse optional inputs
     p = inputParser;
     addParameter(p, 'ShowStimulus', true, @islogical);
     addParameter(p, 'ShowThreshold', true, @islogical);
     addParameter(p, 'PPFTimepoint', [], @isnumeric);
-    addParameter(p, 'ThresholdStyle', 'default', @ischar);  % NEW: threshold style
-    addParameter(p, 'TraceColor', [], @isnumeric);          % NEW: trace color for matching
-    addParameter(p, 'NoiseLevel', 'unknown', @ischar);     % NEW: noise level
-    addParameter(p, 'PlotType', 'individual', @ischar);    % NEW: plot type (individual/average)
+    addParameter(p, 'TraceColor', [], @isnumeric);
+    addParameter(p, 'NoiseLevel', 'unknown', @ischar);     % Pre-calculated noise level
+    addParameter(p, 'PlotType', 'individual', @ischar);
+    addParameter(p, 'UpperThreshold', [], @isnumeric);     % NEW: Pre-calculated upper threshold
+    addParameter(p, 'LowerThreshold', [], @isnumeric);     % NEW: Pre-calculated lower threshold
     parse(p, varargin{:});
     
     % Set y-limits first
@@ -198,11 +199,19 @@ function addPlotElements(timeData_ms, stimulusTime_ms, threshold, plotConfig, va
         end
     end
     
-    % Add threshold line with enhanced styling
-    if p.Results.ShowThreshold && isfinite(threshold)
-        thresholdStyle = getThresholdStyle(plotConfig, p.Results.PlotType, ...
-                                         p.Results.NoiseLevel, p.Results.TraceColor);
-        addThresholdLine(timeData_ms, threshold, thresholdStyle);
+    % Add threshold line using pre-calculated values
+    if p.Results.ShowThreshold
+        % Use upper threshold if available, otherwise fall back to basic threshold
+        displayThreshold = threshold;
+        if ~isempty(p.Results.UpperThreshold)
+            displayThreshold = p.Results.UpperThreshold;
+        end
+        
+        if isfinite(displayThreshold)
+            thresholdStyle = getThresholdStyle(plotConfig, p.Results.PlotType, ...
+                                             p.Results.NoiseLevel, p.Results.TraceColor);
+            addThresholdLine(timeData_ms, displayThreshold, thresholdStyle);
+        end
     end
 end
 
@@ -255,6 +264,52 @@ function noiseLevel = determineNoiseLevel(threshold, config)
         end
     else
         noiseLevel = 'unknown';
+    end
+end
+
+function noiseLevel = getNoiseLevel(roiName, roiInfo)
+    % OPTIMIZED: Get pre-calculated noise level instead of recalculating
+    
+    noiseLevel = 'unknown';  % Default
+    
+    % Try to get from filtering statistics first (most accurate)
+    if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
+        if isfield(roiInfo.filteringStats, 'roiNoiseMap') && ...
+           isfield(roiInfo.filteringStats.roiNoiseMap, roiName)
+            noiseLevel = roiInfo.filteringStats.roiNoiseMap.(roiName);
+            return;
+        end
+    end
+    
+    % Fallback to roiNoiseMap if available (for 1AP)
+    if isfield(roiInfo, 'roiNoiseMap') && isa(roiInfo.roiNoiseMap, 'containers.Map')
+        % Extract ROI number from name
+        roiMatch = regexp(roiName, 'ROI[_\s]*(\d+)', 'tokens', 'ignorecase');
+        if ~isempty(roiMatch)
+            roiNum = str2double(roiMatch{1}{1});
+            if isKey(roiInfo.roiNoiseMap, roiNum)
+                noiseLevel = roiInfo.roiNoiseMap(roiNum);
+            end
+        end
+    end
+end
+
+function [upperThreshold, lowerThreshold] = getSchmittThresholds(roiName, roiInfo)
+    % OPTIMIZED: Get pre-calculated Schmitt thresholds
+    
+    upperThreshold = NaN;
+    lowerThreshold = NaN;
+    
+    if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
+        if isfield(roiInfo.filteringStats, 'roiUpperThresholds') && ...
+           isfield(roiInfo.filteringStats.roiUpperThresholds, roiName)
+            upperThreshold = roiInfo.filteringStats.roiUpperThresholds.(roiName);
+        end
+        
+        if isfield(roiInfo.filteringStats, 'roiLowerThresholds') && ...
+           isfield(roiInfo.filteringStats.roiLowerThresholds, roiName)
+            lowerThreshold = roiInfo.filteringStats.roiLowerThresholds.(roiName);
+        end
     end
 end
 

@@ -62,7 +62,7 @@ function [groupedFiles, groupKeys] = organizeFilesByGroup(excelFiles, rawMeanFol
 end
 
 function [organizedData, averagedData, roiInfo] = organizeGroupData(groupData, groupMetadata, groupKey)
-    % UPDATED: Organize group data with minimal output
+    % UPDATED: Include filtering statistics in roiInfo for plotting
     
     cfg = GluSnFRConfig();
     
@@ -73,6 +73,46 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData(groupData, g
         [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData, groupMetadata, groupKey, cfg);
     else
         [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData, groupMetadata, cfg);
+    end
+    
+    % ENHANCEMENT: Collect filtering statistics from all files for plotting
+    roiInfo.filteringStats = collectFilteringStats(groupData);
+end
+
+function filteringStats = collectFilteringStats(groupData)
+    % Collect filtering statistics from processed files
+    
+    filteringStats = struct();
+    filteringStats.available = false;
+    
+    for i = 1:length(groupData)
+        if ~isempty(groupData{i}) && isfield(groupData{i}, 'filterStats')
+            stats = groupData{i}.filterStats;
+            
+            % Check if Schmitt trigger results are available
+            if isfield(stats, 'schmitt_info')
+                filteringStats.available = true;
+                filteringStats.method = 'schmitt_trigger';
+                
+                % Store noise classifications mapped to ROI names
+                if isfield(groupData{i}, 'roiNames')
+                    roiNames = groupData{i}.roiNames;
+                    noiseClassification = stats.schmitt_info.noise_classification;
+                    upperThresholds = stats.schmitt_info.upper_thresholds;
+                    lowerThresholds = stats.schmitt_info.lower_thresholds;
+                    
+                    for j = 1:length(roiNames)
+                        roiName = roiNames{j};
+                        if j <= length(noiseClassification)
+                            filteringStats.roiNoiseMap.(roiName) = noiseClassification{j};
+                            filteringStats.roiUpperThresholds.(roiName) = upperThresholds(j);
+                            filteringStats.roiLowerThresholds.(roiName) = lowerThresholds(j);
+                        end
+                    end
+                end
+                break; % Use first available stats
+            end
+        end
     end
 end
 

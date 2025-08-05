@@ -125,7 +125,7 @@ end
 
 function success = generateCoverslipFigure(figNum, numFigures, csROIs, plotData, csCell, ...
     genotype, roiInfo, timeData_ms, stimulusTime_ms1, outputFolder, utils, plotConfig)
-    % Generate a single coverslip figure with enhanced threshold styling
+    % OPTIMIZED: Use pre-calculated thresholds and noise levels
     
     success = false;
     
@@ -160,19 +160,26 @@ function success = generateCoverslipFigure(figNum, numFigures, csROIs, plotData,
             
             plot(timeData_ms, traceData, 'Color', traceColor, 'LineWidth', plotConfig.lines.trace);
             
-            % Get threshold and noise level for this ROI
-            threshold = getPPFROIThreshold(varName, roiInfo);
-            roiNoiseLevel = getPPFROINoiseLevel(varName, roiInfo, plotConfig);
+            % OPTIMIZED: Get pre-calculated threshold and noise level
+            [threshold, roiNoiseLevel, upperThreshold, lowerThreshold] = ...
+                getPPFROIData(varName, roiInfo);
             
-            % ENHANCED: Add threshold and stimulus markers with enhanced styling
-            utils.addPlotElements(timeData_ms, stimulusTime_ms1, threshold, plotConfig, ...
+            % Use upper threshold for display if available
+            displayThreshold = threshold;
+            if ~isnan(upperThreshold)
+                displayThreshold = upperThreshold;
+            end
+            
+            % Add threshold and stimulus markers with optimized styling
+            utils.addPlotElements(timeData_ms, stimulusTime_ms1, displayThreshold, plotConfig, ...
                 'ShowStimulus', true, 'ShowThreshold', true, ...
                 'PPFTimepoint', roiInfo.timepoint, ...
                 'PlotType', 'individual', 'NoiseLevel', roiNoiseLevel, ...
-                'TraceColor', traceColor);
+                'TraceColor', traceColor, 'UpperThreshold', upperThreshold, ...
+                'LowerThreshold', lowerThreshold);
         end
         
-        % Format title
+        % Format title with pre-calculated values
         roiMatch = regexp(varName, '.*_ROI(\d+)', 'tokens');
         if ~isempty(roiMatch)
             roiTitle = sprintf('ROI %s', roiMatch{1}{1});
@@ -180,8 +187,8 @@ function success = generateCoverslipFigure(figNum, numFigures, csROIs, plotData,
                 roiTitle = sprintf('%s (SP)', roiTitle);
             end
             
-            % Add noise level indicator
-            roiNoiseLevel = getPPFROINoiseLevel(varName, roiInfo, plotConfig);
+            % Add noise level indicator using pre-calculated value
+            [~, roiNoiseLevel] = getPPFROIData(varName, roiInfo);
             if strcmp(roiNoiseLevel, 'low')
                 roiTitle = sprintf('%s (Low)', roiTitle);
             elseif strcmp(roiNoiseLevel, 'high')
@@ -219,6 +226,71 @@ function success = generateCoverslipFigure(figNum, numFigures, csROIs, plotData,
     end
     
     close(fig);
+end
+
+function [threshold, noiseLevel, upperThreshold, lowerThreshold] = getPPFROIData(varName, roiInfo)
+    % OPTIMIZED: Get all PPF ROI data from pre-calculated values
+    
+    threshold = NaN;
+    noiseLevel = 'unknown';
+    upperThreshold = NaN;
+    lowerThreshold = NaN;
+    
+    % Extract coverslip and ROI info
+    roiMatch = regexp(varName, '(Cs\d+-c\d+)_ROI(\d+)', 'tokens');
+    if isempty(roiMatch)
+        return;
+    end
+    
+    csCell = roiMatch{1}{1};
+    roiNum = str2double(roiMatch{1}{2});
+    roiName = sprintf('ROI %03d', roiNum);
+    
+    % Try to get from filtering statistics first
+    if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
+        if isfield(roiInfo.filteringStats, 'roiNoiseMap') && ...
+           isfield(roiInfo.filteringStats.roiNoiseMap, roiName)
+            noiseLevel = roiInfo.filteringStats.roiNoiseMap.(roiName);
+        end
+        
+        if isfield(roiInfo.filteringStats, 'roiUpperThresholds') && ...
+           isfield(roiInfo.filteringStats.roiUpperThresholds, roiName)
+            upperThreshold = roiInfo.filteringStats.roiUpperThresholds.(roiName);
+        end
+        
+        if isfield(roiInfo.filteringStats, 'roiLowerThresholds') && ...
+           isfield(roiInfo.filteringStats.roiLowerThresholds, roiName)
+            lowerThreshold = roiInfo.filteringStats.roiLowerThresholds.(roiName);
+        end
+    end
+    
+    % Fallback to original method if pre-calculated values not available
+    if strcmp(noiseLevel, 'unknown') || isnan(upperThreshold)
+        try
+            for fileIdx = 1:length(roiInfo.coverslipFiles)
+                fileData = roiInfo.coverslipFiles(fileIdx);
+                if strcmp(fileData.coverslipCell, csCell)
+                    roiIdx = find(fileData.roiNumbers == roiNum, 1);
+                    if ~isempty(roiIdx) && roiIdx <= length(fileData.thresholds)
+                        threshold = fileData.thresholds(roiIdx);
+                        
+                        % Only calculate noise level if not already available
+                        if strcmp(noiseLevel, 'unknown') && isfinite(threshold)
+                            cfg = GluSnFRConfig();
+                            if threshold <= cfg.thresholds.LOW_NOISE_CUTOFF
+                                noiseLevel = 'low';
+                            else
+                                noiseLevel = 'high';
+                            end
+                        end
+                        return;
+                    end
+                end
+            end
+        catch
+            % Silent fallback
+        end
+    end
 end
 
 function success = generateAveragedPlot(averagedData, config, varargin)
@@ -436,48 +508,6 @@ function isSinglePeak = checkIfSinglePeakROI(varName, csCell, roiInfo)
     end
 end
 
-function threshold = getPPFROIThreshold(varName, roiInfo)
-    % Get threshold for specific PPF ROI
-    
-    threshold = NaN;
-    
-    try
-        roiMatch = regexp(varName, '(Cs\d+-c\d+)_ROI(\d+)', 'tokens');
-        if ~isempty(roiMatch)
-            csCell = roiMatch{1}{1};
-            roiNum = str2double(roiMatch{1}{2});
-            
-            for fileIdx = 1:length(roiInfo.coverslipFiles)
-                fileData = roiInfo.coverslipFiles(fileIdx);
-                if strcmp(fileData.coverslipCell, csCell)
-                    roiIdx = find(fileData.roiNumbers == roiNum, 1);
-                    if ~isempty(roiIdx) && roiIdx <= length(fileData.thresholds)
-                        threshold = fileData.thresholds(roiIdx);
-                        return;
-                    end
-                end
-            end
-        end
-    catch
-        threshold = NaN;
-    end
-end
-
-function noiseLevel = getPPFROINoiseLevel(varName, roiInfo, plotConfig)
-    % NEW: Get noise level for specific PPF ROI
-    
-    noiseLevel = 'unknown';
-    
-    try
-        threshold = getPPFROIThreshold(varName, roiInfo);
-        if isfinite(threshold)
-            utils = plot_utilities();
-            noiseLevel = utils.determineNoiseLevel(threshold, plotConfig);
-        end
-    catch
-        noiseLevel = 'unknown';
-    end
-end
 
 function traceColor = getPPFTraceColor(plotSubtype, genotype, plotConfig)
     % Get appropriate trace color for PPF plots

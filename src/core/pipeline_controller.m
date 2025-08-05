@@ -521,7 +521,7 @@ function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFol
 end
 
 function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMatrix, hasGPU, gpuInfo)
-    % Process single file (FIXED: Use new reader structure)
+    % UPDATED: Store filtering statistics for plotting
     
     fullFilePath = fullfile(fileInfo.folder, fileInfo.name);
     
@@ -532,14 +532,14 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     filter = roi_filter();
     utils = string_utils(cfg);
     
-    % Read file (FIXED: Use new reader)
+    % Read file
     [rawData, headers, readSuccess] = reader.readFile(fullFilePath, useReadMatrix);
     
     if ~readSuccess || isempty(rawData)
         error('Failed to read file: %s', fileInfo.name);
     end
     
-    % Extract valid data (FIXED: Use new reader)
+    % Extract valid data
     [validHeaders, validColumns] = reader.extractHeaders(headers);
     
     if isempty(validHeaders)
@@ -554,7 +554,7 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     % Extract experiment info
     [trialNum, expType, ppiValue, coverslipCell] = utils.extractTrialOrPPI(fileInfo.name);
     
-    % Apply filtering
+    % Apply filtering (THIS IS WHERE SCHMITT RESULTS ARE GENERATED)
     if strcmp(expType, 'PPF') && isfinite(ppiValue)
         [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
             filter.filterROIs(dF_values, validHeaders, thresholds, 'PPF', ppiValue);
@@ -563,7 +563,7 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
             filter.filterROIs(dF_values, validHeaders, thresholds, '1AP');
     end
     
-    % Prepare output
+    % Prepare output - ENHANCED: Include full filtering statistics
     data = struct();
     data.timeData_ms = timeData_ms;
     data.dF_values = finalDFValues;
@@ -571,7 +571,13 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     data.thresholds = finalThresholds;
     data.stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS;
     data.gpuUsed = gpuUsed;
-    data.filterStats = filterStats;
+    data.filterStats = filterStats;  % CRITICAL: Include full filter stats
+    
+    % ENHANCEMENT: If Schmitt trigger was used, also store original headers mapping
+    if isfield(filterStats, 'schmitt_info')
+        data.originalHeaders = validHeaders;  % For mapping back to original ROI names
+        data.originalThresholds = thresholds; % Original thresholds before filtering
+    end
     
     metadata = struct();
     metadata.filename = fileInfo.name;
@@ -585,6 +591,7 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     metadata.experimentType = expType;
     metadata.ppiValue = ppiValue;
     metadata.coverslipCell = coverslipCell;
+    metadata.filteringMethod = filterStats.method;  % Track which filtering method was used
 end
 
 function result = prepareGroupResult(groupData, groupMetadata, roiInfo, status)

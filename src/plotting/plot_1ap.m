@@ -102,7 +102,7 @@ end
 function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedData, ...
     roiInfo, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
     cleanGroupKey, outputFolder, utils, plotConfig, config)
-    % Generate a single trials figure with per-trial threshold styling
+    % OPTIMIZED: Use pre-calculated noise levels and thresholds
     
     success = false;
     
@@ -125,8 +125,28 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
         
         trialCount = 0;
         
-        % FIXED: Track noise levels for this subplot to show in title
-        noiseLevelsInPlot = {};
+        % Pre-calculate noise level for this ROI (avoid recalculation in loop)
+        roiNoiseLevel = 'unknown';
+        if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
+            % Try to find noise level from first valid trial
+            for i = 1:length(uniqueTrials)
+                trialNum = uniqueTrials(i);
+                colName = sprintf('ROI%d_T%g', originalROI, trialNum);
+                if ismember(colName, organizedData.Properties.VariableNames)
+                    roiNoiseLevel = utils.getNoiseLevel(sprintf('ROI %03d', originalROI), roiInfo);
+                    break;
+                end
+            end
+        else
+            % Fallback to roiNoiseMap
+            if isKey(roiInfo.roiNoiseMap, originalROI)
+                roiNoiseLevel = roiInfo.roiNoiseMap(originalROI);
+            end
+        end
+        
+        % Get pre-calculated Schmitt thresholds if available
+        roiName = sprintf('ROI %03d', originalROI);
+        [upperThreshold, lowerThreshold] = utils.getSchmittThresholds(roiName, roiInfo);
         
         % Plot trials for this ROI
         for i = 1:length(uniqueTrials)
@@ -146,23 +166,26 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
                         'LineWidth', plotConfig.lines.trace);
                     h_line.Color(4) = plotConfig.transparency;
                     
-                    % FIXED: Get threshold and determine noise level PER TRIAL
-                    trialIdx = find(roiInfo.originalTrialNumbers == trialNum, 1);
-                    if ~isempty(trialIdx) && roiIdx <= size(roiInfo.thresholds, 1) && ...
-                       trialIdx <= size(roiInfo.thresholds, 2) && ...
-                       isfinite(roiInfo.thresholds(roiIdx, trialIdx))
-                        
-                        threshold = roiInfo.thresholds(roiIdx, trialIdx);
-                        
-                        % FIXED: Determine noise level from THIS trial's threshold
-                        trialNoiseLevel = utils.determineNoiseLevel(threshold, config);
-                        noiseLevelsInPlot{end+1} = trialNoiseLevel;
-                        
-                        % Add threshold line with per-trial styling
-                        utils.addPlotElements(timeData_ms, stimulusTime_ms, threshold, plotConfig, ...
+                    % Use appropriate threshold for display
+                    displayThreshold = NaN;
+                    if ~isnan(upperThreshold)
+                        displayThreshold = upperThreshold;  % Use Schmitt upper threshold
+                    else
+                        % Fallback to basic threshold
+                        trialIdx = find(roiInfo.originalTrialNumbers == trialNum, 1);
+                        if ~isempty(trialIdx) && roiIdx <= size(roiInfo.thresholds, 1) && ...
+                           trialIdx <= size(roiInfo.thresholds, 2)
+                            displayThreshold = roiInfo.thresholds(roiIdx, trialIdx);
+                        end
+                    end
+                    
+                    % Add threshold line with pre-calculated styling
+                    if isfinite(displayThreshold)
+                        utils.addPlotElements(timeData_ms, stimulusTime_ms, displayThreshold, plotConfig, ...
                             'ShowStimulus', false, 'ShowThreshold', true, ...
-                            'PlotType', 'individual', 'NoiseLevel', trialNoiseLevel, ...
-                            'TraceColor', traceColor);
+                            'PlotType', 'individual', 'NoiseLevel', roiNoiseLevel, ...
+                            'TraceColor', traceColor, 'UpperThreshold', upperThreshold, ...
+                            'LowerThreshold', lowerThreshold);
                     end
                 end
             end
@@ -172,8 +195,8 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
         utils.addPlotElements(timeData_ms, stimulusTime_ms, NaN, plotConfig, ...
             'ShowStimulus', true, 'ShowThreshold', false);
         
-        % ENHANCED: Format title with noise level summary for this subplot
-        noiseLevelText = createNoiseLevelSummary(noiseLevelsInPlot);
+        % Format title with pre-calculated noise level
+        noiseLevelText = createNoiseLevelSummary(roiNoiseLevel, trialCount);
         
         title(sprintf('ROI %d%s (n=%d)', originalROI, noiseLevelText, trialCount), ...
             'FontSize', plotConfig.fonts.subtitle, 'FontWeight', 'bold');
@@ -207,33 +230,18 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
     close(fig);
 end
 
-function noiseLevelText = createNoiseLevelSummary(noiseLevelsInPlot)
-    % NEW: Create noise level summary for subplot title
+function noiseLevelText = createNoiseLevelSummary(roiNoiseLevel, trialCount)
+    % OPTIMIZED: Use pre-calculated noise level instead of analyzing multiple trials
     
-    noiseLevelText = '';
-    
-    if isempty(noiseLevelsInPlot)
-        return;
-    end
-    
-    % Count noise levels
-    lowCount = sum(strcmp(noiseLevelsInPlot, 'low'));
-    highCount = sum(strcmp(noiseLevelsInPlot, 'high'));
-    unknownCount = sum(strcmp(noiseLevelsInPlot, 'unknown'));
-    
-    % Create summary text
-    if lowCount > 0 && highCount > 0
-        % Mixed noise levels
-        noiseLevelText = sprintf(' (L:%d, H:%d)', lowCount, highCount);
-    elseif lowCount > 0 && highCount == 0
-        % All low noise
-        noiseLevelText = ' (Low)';
-    elseif highCount > 0 && lowCount == 0
-        % All high noise
-        noiseLevelText = ' (High)';
-    elseif unknownCount > 0
-        % Unknown noise levels
-        noiseLevelText = ' (?)';
+    switch roiNoiseLevel
+        case 'low'
+            noiseLevelText = ' (Low)';
+        case 'high'
+            noiseLevelText = ' (High)';
+        case 'unknown'
+            noiseLevelText = ' (?)';
+        otherwise
+            noiseLevelText = '';
     end
 end
 
