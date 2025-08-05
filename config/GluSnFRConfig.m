@@ -35,7 +35,29 @@ function config = GluSnFRConfig()
     config.filtering.MIN_RESPONSE_AMPLITUDE = 0.01;
     config.filtering.MAX_BASELINE_NOISE = 0.05;
     config.filtering.ENABLE_DUPLICATE_REMOVAL = false;
-    config.filtering.ENABLE_ENHANCED_FILTERING = true;
+    config.filtering.ENABLE_ENHANCED_FILTERING = false;
+    
+    % NEW: Schmitt Trigger Filtering Parameters
+    config.filtering.USE_SCHMITT_TRIGGER = true;  % Enable Schmitt trigger as default
+    config.filtering.schmitt = struct();
+    
+    % Schmitt threshold multipliers
+    config.filtering.schmitt.LOW_NOISE_UPPER_MULT = 1.0;      % 3σ for low noise
+    config.filtering.schmitt.HIGH_NOISE_UPPER_MULT = 1.1667;   % 3.5σ for high noise
+    config.filtering.schmitt.LOWER_THRESHOLD_MULT = 0.5;      % 1.5σ for reset threshold
+    
+    % Search windows (frames)
+    config.filtering.schmitt.POST_STIM_SEARCH_FRAMES = 50;    % Extended search window
+    config.filtering.schmitt.DECAY_ANALYSIS_FRAMES = 50;      % Decay analysis window
+    config.filtering.schmitt.PPF_WINDOW1_FRAMES = 50;         % PPF first stimulus window
+    config.filtering.schmitt.PPF_WINDOW2_FRAMES = 50;         % PPF second stimulus window
+    
+    % Signal validation criteria
+    config.filtering.schmitt.MIN_SIGNAL_DURATION = 0;         % Minimum frames (0 = no minimum)
+    config.filtering.schmitt.PEAK_AMPLITUDE_FACTOR = 1.0;     % Peak must be >= threshold * factor
+    config.filtering.schmitt.MAX_DECAY_RATIO = 2.0;           % Maximum allowed decay ratio
+    config.filtering.schmitt.SHORT_SIGNAL_THRESHOLD = 10;     % Frames considered "short signal"
+    config.filtering.schmitt.MAX_NOISE_RATIO = 0.6;           % Maximum noise-to-signal ratio
     
     %% Processing Parameters
     config.processing = struct();
