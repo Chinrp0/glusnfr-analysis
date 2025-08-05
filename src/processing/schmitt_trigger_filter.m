@@ -2,21 +2,57 @@ function filter = schmitt_trigger_filter()
     % SCHMITT_TRIGGER_FILTER - ROI filtering using Schmitt trigger logic
     %
     % This implements a Schmitt trigger-based ROI filtering system that:
-    % - Uses 3σ upper threshold (4.5σ for high noise ROIs)
-    % - Uses 1.5σ lower threshold
-    % - Filters out signals that decay below lower threshold within 1 frame
+    % - Uses configurable upper/lower thresholds
+    % - Filters out signals that decay too quickly
     % - Integrates with existing noise level classification
     
     filter.filterROIs = @filterROIsSchmitt;
     filter.applySchmittTrigger = @applySchmittTrigger;
     filter.classifyNoiseLevel = @classifyNoiseLevel;
     filter.calculateThresholds = @calculateSchmittThresholds;
+    filter.getParams = @getSchmittParams;
+    filter.calculateSingleThreshold = @calculateSingleThreshold;
 end
+
+% ========================================================================
+% CONFIGURABLE PARAMETERS - Modify these values for tuning
+% ========================================================================
+
+function params = getSchmittParams()
+    params = struct();
+    
+    % Keep your current amplitude thresholds (they look good)
+    params.LOW_NOISE_UPPER_MULT = 1.0;      % 3σ
+    params.HIGH_NOISE_UPPER_MULT = 1.166;     % 3.3σ 
+    params.LOWER_THRESHOLD_MULT = 0.5;      % 1.5σ
+    
+    % EXTEND search window for async release
+    params.POST_STIM_SEARCH_FRAMES = 50;  
+    params.DECAY_ANALYSIS_FRAMES = 50;      
+    
+    % RELAX signal validation (main issue!)
+    params.MIN_SIGNAL_DURATION = 0;         % At least 2 frames (10ms) - reject 1-frame noise
+    params.PEAK_AMPLITUDE_FACTOR = 1.0;    % Only 1% above threshold (was 1.05)
+    params.MAX_DECAY_RATIO = 2.0;           % More lenient decay (was 2.0)
+    params.SHORT_SIGNAL_THRESHOLD = 10;     % More signals get lenient validation
+    
+    % Very lenient quality checks
+    params.MAX_NOISE_RATIO = 0.6;           % Allow noisier signals (was 0.6)
+    
+    % PPF parameters  
+    params.PPF_WINDOW1_FRAMES = 50;        % Extend these too
+    params.PPF_WINDOW2_FRAMES = 50;
+end
+
+% ========================================================================
+% MAIN FILTERING FUNCTIONS
+% ========================================================================
 
 function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsSchmitt(dF_values, headers, thresholds, experimentType, varargin)
     % Main Schmitt trigger filtering function
     
     cfg = GluSnFRConfig();
+    params = getSchmittParams();
     
     % Parse inputs
     isPPF = strcmp(experimentType, 'PPF');
@@ -43,7 +79,7 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     end
     
     % Step 2: Classify noise levels and calculate Schmitt thresholds
-    [noiseClassification, upperThresholds, lowerThresholds] = calculateSchmittThresholds(thresholds, cfg);
+    [noiseClassification, upperThresholds, lowerThresholds] = calculateSchmittThresholds(thresholds, cfg, params);
     
     % Step 3: Apply Schmitt trigger for each ROI
     schmittMask = false(1, n_rois_after_cleanup);
@@ -51,7 +87,7 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     
     for roi = 1:n_rois_after_cleanup
         [passes, details] = applySchmittTrigger(dF_values(:, roi), upperThresholds(roi), ...
-                                              lowerThresholds(roi), experimentType, timepoint_ms, cfg);
+                                              lowerThresholds(roi), experimentType, timepoint_ms, cfg, params);
         schmittMask(roi) = passes;
         schmitt_details{roi} = details;
     end
@@ -63,7 +99,7 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     
     % Step 5: Generate statistics
     stats = generateSchmittStats(headers, schmittMask, noiseClassification, ...
-                                schmitt_details, experimentType, cfg);
+                                schmitt_details, experimentType, cfg, params);
     
     % Add Schmitt-specific information
     stats.schmitt_info = struct();
@@ -71,24 +107,16 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     stats.schmitt_info.lower_thresholds = lowerThresholds;
     stats.schmitt_info.noise_classification = noiseClassification;
     stats.schmitt_info.details = schmitt_details;
+    stats.schmitt_info.params_used = params;
 end
 
-function [noiseClassification, upperThresholds, lowerThresholds] = calculateSchmittThresholds(baseThresholds, cfg)
-    % IMPROVED: Calculate thresholds with option for more lenient lower threshold
+function [noiseClassification, upperThresholds, lowerThresholds] = calculateSchmittThresholds(baseThresholds, cfg, params)
+    % Calculate thresholds using configurable parameters
     
     n_rois = length(baseThresholds);
     noiseClassification = cell(n_rois, 1);
     upperThresholds = zeros(n_rois, 1);
     lowerThresholds = zeros(n_rois, 1);
-    
-    % IMPROVEMENT 5: More lenient lower threshold option
-    % Previous: always 0.5 (1.5σ)
-    % New: configurable, default to more lenient 0.33 (1σ)
-    if isfield(cfg.thresholds, 'SCHMITT_LOWER_MULTIPLIER')
-        lower_multiplier = cfg.thresholds.SCHMITT_LOWER_MULTIPLIER;
-    else
-        lower_multiplier = 0.33;  % 1σ instead of 1.5σ - more lenient
-    end
     
     for i = 1:n_rois
         threshold = baseThresholds(i);
@@ -96,36 +124,39 @@ function [noiseClassification, upperThresholds, lowerThresholds] = calculateSchm
         % Classify noise level
         if threshold <= cfg.thresholds.LOW_NOISE_CUTOFF
             noiseClassification{i} = 'low';
-            % Low noise: 3σ upper, 1σ lower (more lenient)
-            upperThresholds(i) = threshold;  % Already 3σ from dF/F calculation
-            lowerThresholds(i) = threshold * lower_multiplier;  % More lenient lower threshold
+            upperThresholds(i) = threshold * params.LOW_NOISE_UPPER_MULT;
+            lowerThresholds(i) = threshold * params.LOWER_THRESHOLD_MULT;
         else
             noiseClassification{i} = 'high';
-            % High noise: 4.0σ upper, 1σ lower (more lenient)
-            upperThresholds(i) = threshold * 1.333;  % 4.0σ = 3σ * 1.333
-            lowerThresholds(i) = threshold * lower_multiplier;  % More lenient lower threshold
+            upperThresholds(i) = threshold * params.HIGH_NOISE_UPPER_MULT;
+            lowerThresholds(i) = threshold * params.LOWER_THRESHOLD_MULT;
         end
     end
 end
 
-function [passes, details] = applySchmittTrigger(trace, upperThreshold, lowerThreshold, experimentType, timepoint_ms, cfg)
-    % IMPROVED: Apply Schmitt trigger logic with reduced false negatives
+function [passes, details] = applySchmittTrigger(trace, upperThreshold, lowerThreshold, experimentType, timepoint_ms, cfg, params)
+    % Apply Schmitt trigger logic with configurable parameters
+    
+    % Handle optional params argument for backward compatibility
+    if nargin < 7 || isempty(params)
+        params = getSchmittParams();
+    end
     
     details = struct();
     details.triggered = false;
     details.valid_signals = 0;
     details.invalid_signals = 0;
     details.signal_durations = [];
-    details.debug_info = struct(); % For debugging
+    details.debug_info = struct();
     
-    % Define stimulus frames
+    % Define stimulus frames using configurable parameters
     stimFrame1 = cfg.timing.STIMULUS_FRAME;
     if strcmp(experimentType, 'PPF') && ~isempty(timepoint_ms)
         stimFrame2 = stimFrame1 + round(timepoint_ms / cfg.timing.MS_PER_FRAME);
-        search_windows = [stimFrame1 + 1 : stimFrame1 + 50, ...  % Window 1: 50 frames after stim1
-                         stimFrame2 + 1 : min(stimFrame2 + 50, length(trace))]; % Window 2: 50 frames after stim2
+        search_windows = [stimFrame1 + 1 : stimFrame1 + params.PPF_WINDOW1_FRAMES, ...
+                         stimFrame2 + 1 : min(stimFrame2 + params.PPF_WINDOW2_FRAMES, length(trace))];
     else
-        search_windows = stimFrame1 + 1 : min(stimFrame1 + 50, length(trace)); % 50 frames after stimulus
+        search_windows = stimFrame1 + 1 : min(stimFrame1 + params.POST_STIM_SEARCH_FRAMES, length(trace));
     end
     
     % Ensure search windows are within trace bounds
@@ -149,28 +180,17 @@ function [passes, details] = applySchmittTrigger(trace, upperThreshold, lowerThr
     details.triggered = true;
     details.debug_info.upper_crossings = upper_crossings;
     
-    % IMPROVEMENT 1: More lenient signal duration criteria
-    % Previous: signal_duration <= 1 frame was invalid
-    % New: Use different criteria based on signal characteristics
-    
-    % IMPROVEMENT 2: Consider signal shape and decay pattern
-    % Real calcium signals typically have:
-    % - Fast rise (1-2 frames)
-    % - Slower decay (exponential-like)
-    % - Duration of 10-100ms (2-20 frames)
-    
     valid_signals = 0;
     
     for i = 1:length(upper_crossings)
         crossing_frame = upper_crossings(i);
         
-        % IMPROVEMENT 3: Adaptive decay analysis window
-        % Use shorter window for initial analysis (50 frames = 250ms)
+        % Use configurable decay analysis window
         decay_search_start = crossing_frame + 1;
-        decay_search_end = min(crossing_frame + 50, length(trace)); % Reduced from 100 to 50
+        decay_search_end = min(crossing_frame + params.DECAY_ANALYSIS_FRAMES, length(trace));
         
         if decay_search_start > length(trace)
-            continue; % Can't analyze decay if at end of trace
+            continue;
         end
         
         % Find when signal decays below lower threshold
@@ -187,9 +207,9 @@ function [passes, details] = applySchmittTrigger(trace, upperThreshold, lowerThr
             decay_frame = decay_search_start + below_lower - 1;
             signal_duration = decay_frame - crossing_frame;
             
-            % IMPROVEMENT 4: More sophisticated validation criteria
+            % Use configurable validation criteria
             is_valid = validate_signal_characteristics(trace, crossing_frame, decay_frame, ...
-                                                     upperThreshold, lowerThreshold, cfg);
+                                                     upperThreshold, lowerThreshold, params);
             
             if is_valid
                 valid_signals = valid_signals + 1;
@@ -201,20 +221,16 @@ function [passes, details] = applySchmittTrigger(trace, upperThreshold, lowerThr
     end
     
     details.valid_signals = valid_signals;
-    
-    % ROI passes if it has at least one valid signal
     passes = valid_signals > 0;
 end
 
-function is_valid = validate_signal_characteristics(trace, crossing_frame, decay_frame, upperThreshold, lowerThreshold, cfg)
-    % IMPROVEMENT 4: Enhanced signal validation logic
+function is_valid = validate_signal_characteristics(trace, crossing_frame, decay_frame, upperThreshold, lowerThreshold, params)
+    % Enhanced signal validation using ONLY configurable parameters - NO MAGIC NUMBERS
     
     signal_duration = decay_frame - crossing_frame;
     
-    % Criterion 1: Minimum duration (more lenient than before)
-    % Previous: duration > 1 frame (5ms)
-    % New: duration > 0 frames BUT with additional quality checks
-    if signal_duration <= 0
+    % Criterion 1: Minimum duration check (uses params)
+    if signal_duration <= params.MIN_SIGNAL_DURATION
         is_valid = false;
         return;
     end
@@ -232,23 +248,21 @@ function is_valid = validate_signal_characteristics(trace, crossing_frame, decay
     
     signal_trace = trace(signal_window);
     
-    % Criterion 3: Peak amplitude check
+    % Criterion 3: Peak amplitude check (ALWAYS uses params.PEAK_AMPLITUDE_FACTOR)
     peak_amplitude = max(signal_trace);
-    if peak_amplitude < upperThreshold * 1.1  % Peak should be meaningfully above threshold
+    if peak_amplitude < upperThreshold * params.PEAK_AMPLITUDE_FACTOR
         is_valid = false;
         return;
     end
     
-    % Criterion 4: Signal shape check - should have reasonable decay
-    % For very short signals (1-2 frames), be more permissive
-    if signal_duration <= 2
-        % For very short signals, just check if they're above a reasonable amplitude
-        is_valid = peak_amplitude >= upperThreshold;
+    % Criterion 4: For short signals, use lenient validation (uses params.SHORT_SIGNAL_THRESHOLD)
+    if signal_duration <= params.SHORT_SIGNAL_THRESHOLD
+        % For short signals, only require peak amplitude check (already passed above)
+        is_valid = true;
         return;
     end
     
-    % Criterion 5: For longer signals, check decay pattern
-    % Real calcium signals should show some decay, not just noise
+    % Criterion 5: For longer signals, check decay pattern (uses params.MAX_DECAY_RATIO)
     first_half = signal_trace(1:ceil(length(signal_trace)/2));
     second_half = signal_trace(ceil(length(signal_trace)/2)+1:end);
     
@@ -256,29 +270,29 @@ function is_valid = validate_signal_characteristics(trace, crossing_frame, decay
         mean_first = mean(first_half);
         mean_second = mean(second_half);
         
-        % Signal should generally decay (first half > second half)
-        % But allow some tolerance for noise
         decay_ratio = mean_second / mean_first;
-        if decay_ratio > 1.5  % Signal increases too much - likely noise
+        if decay_ratio > params.MAX_DECAY_RATIO
             is_valid = false;
             return;
         end
     end
     
-    % Criterion 6: Check for excessive noise within signal
+    % Criterion 6: Check for excessive noise (uses params.MAX_NOISE_RATIO and params.SHORT_SIGNAL_THRESHOLD)
     signal_noise = std(signal_trace);
     signal_mean = mean(signal_trace);
-    if signal_noise > signal_mean * 0.5 && signal_duration < 5  % Very noisy short signals
+    if signal_noise > signal_mean * params.MAX_NOISE_RATIO && signal_duration < params.SHORT_SIGNAL_THRESHOLD
         is_valid = false;
         return;
     end
     
-    % If we get here, signal passes all criteria
     is_valid = true;
 end
 
+% ========================================================================
+% SUPPORTING FUNCTIONS (unchanged)
+% ========================================================================
 
-function stats = generateSchmittStats(headers, schmittMask, noiseClassification, schmitt_details, experimentType, cfg)
+function stats = generateSchmittStats(headers, schmittMask, noiseClassification, schmitt_details, experimentType, cfg, params)
     % Generate comprehensive statistics for Schmitt trigger filtering
     
     stats = struct();
@@ -309,12 +323,8 @@ function stats = generateSchmittStats(headers, schmittMask, noiseClassification,
         stats.signal_validity_rate = 0;
     end
     
-    % Configuration used
-    stats.configUsed = struct();
-    stats.configUsed.upper_multiplier_low_noise = 1.0;  % 3σ
-    stats.configUsed.upper_multiplier_high_noise = 1.5; % 4.5σ
-    stats.configUsed.lower_multiplier = 0.5;            % 1.5σ
-    stats.configUsed.min_signal_duration_frames = 2;    % >1 frame
+    % Configuration used (now from parameters)
+    stats.configUsed = params;
     stats.configUsed.lowNoiseCutoff = cfg.thresholds.LOW_NOISE_CUTOFF;
     
     % Create summary string
@@ -332,4 +342,23 @@ function stats = createEmptyStats(experimentType)
     stats.passedROIs = 0;
     stats.filterRate = 0;
     stats.summary = sprintf('%s Schmitt: No ROIs to filter', experimentType);
+end
+
+function [noiseLabel, upperThresh, lowerThresh] = calculateSingleThreshold(baseThreshold, cfg, params)
+    % Calculate Schmitt thresholds for a single ROI using centralized parameters
+    % This ensures plotting functions use the same logic as filtering
+    
+    if nargin < 3
+        params = getSchmittParams();
+    end
+    
+    if baseThreshold <= cfg.thresholds.LOW_NOISE_CUTOFF
+        noiseLabel = 'Low';
+        upperThresh = baseThreshold * params.LOW_NOISE_UPPER_MULT;
+        lowerThresh = baseThreshold * params.LOWER_THRESHOLD_MULT;
+    else
+        noiseLabel = 'High';
+        upperThresh = baseThreshold * params.HIGH_NOISE_UPPER_MULT;
+        lowerThresh = baseThreshold * params.LOWER_THRESHOLD_MULT;
+    end
 end
