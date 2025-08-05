@@ -1,6 +1,6 @@
 function utils = plot_utilities()
     % PLOT_UTILITIES - Centralized plotting utilities and configuration
-    % Enhanced with improved threshold line styling
+    % RETRIEVE ONLY: All functions get pre-calculated values using existing ROI number extraction
     
     utils.getPlotConfig = @getPlotConfig;
     utils.createFigure = @createFigure;
@@ -13,8 +13,13 @@ function utils = plot_utilities()
     utils.createLegend = @createLegend;
     utils.addStimulusToLegend = @addStimulusToLegend;
     utils.createTrialLegend = @createTrialLegend;
-    utils.getThresholdStyle = @getThresholdStyle;  % NEW: Get threshold styling
-    utils.determineNoiseLevel = @determineNoiseLevel;  % NEW: Determine noise level
+    utils.getThresholdStyle = @getThresholdStyle;
+    % RETRIEVE ONLY: Pre-calculated values using existing string_utils
+    utils.getNoiseLevel = @getNoiseLevel;  % Uses extractROINumbers() from string_utils
+    utils.getSchmittThresholds = @getSchmittThresholds;  % Uses extractROINumbers() from string_utils
+    utils.getBasicThreshold = @getBasicThreshold;  % Uses extractROINumbers() from string_utils
+    % CALCULATE ONCE: Only for initial processing
+    utils.calculateNoiseLevelFromThreshold = @calculateNoiseLevelFromThreshold;  % Calculate during processing only
 end
 
 function plotConfig = getPlotConfig(glusnfrConfig)
@@ -268,47 +273,101 @@ function noiseLevel = determineNoiseLevel(threshold, config)
 end
 
 function noiseLevel = getNoiseLevel(roiName, roiInfo)
-    % OPTIMIZED: Get pre-calculated noise level instead of recalculating
+    % RETRIEVE ONLY: Get pre-calculated noise level using existing ROI number extraction
     
-    noiseLevel = 'unknown';  % Default
+    noiseLevel = 'unknown';  % Default when data not available
     
-    % Try to get from filtering statistics first (most accurate)
+    % Use existing string_utils to extract ROI number from name
+    cfg = GluSnFRConfig();
+    utils = string_utils(cfg);
+    roiNumbers = utils.extractROINumbers({roiName});
+    
+    if isempty(roiNumbers)
+        return;
+    end
+    
+    roiNum = roiNumbers(1);
+    
+    % Get from pre-calculated filtering statistics using ROI number as key
     if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
         if isfield(roiInfo.filteringStats, 'roiNoiseMap') && ...
-           isfield(roiInfo.filteringStats.roiNoiseMap, roiName)
-            noiseLevel = roiInfo.filteringStats.roiNoiseMap.(roiName);
+           isa(roiInfo.filteringStats.roiNoiseMap, 'containers.Map') && ...
+           isKey(roiInfo.filteringStats.roiNoiseMap, roiNum)
+            noiseLevel = roiInfo.filteringStats.roiNoiseMap(roiNum);
             return;
         end
     end
     
-    % Fallback to roiNoiseMap if available (for 1AP)
-    if isfield(roiInfo, 'roiNoiseMap') && isa(roiInfo.roiNoiseMap, 'containers.Map')
-        % Extract ROI number from name
-        roiMatch = regexp(roiName, 'ROI[_\s]*(\d+)', 'tokens', 'ignorecase');
-        if ~isempty(roiMatch)
-            roiNum = str2double(roiMatch{1}{1});
-            if isKey(roiInfo.roiNoiseMap, roiNum)
-                noiseLevel = roiInfo.roiNoiseMap(roiNum);
-            end
-        end
+    % For 1AP experiments - check legacy roiNoiseMap
+    if isfield(roiInfo, 'roiNoiseMap') && isa(roiInfo.roiNoiseMap, 'containers.Map') && ...
+       isKey(roiInfo.roiNoiseMap, roiNum)
+        noiseLevel = roiInfo.roiNoiseMap(roiNum);
     end
+    
+    % NO FALLBACK CALCULATIONS - return 'unknown' if not pre-calculated
 end
 
 function [upperThreshold, lowerThreshold] = getSchmittThresholds(roiName, roiInfo)
-    % OPTIMIZED: Get pre-calculated Schmitt thresholds
+    % RETRIEVE ONLY: Get pre-calculated Schmitt thresholds using existing ROI number extraction
     
     upperThreshold = NaN;
     lowerThreshold = NaN;
     
+    % Use existing string_utils to extract ROI number from name
+    cfg = GluSnFRConfig();
+    utils = string_utils(cfg);
+    roiNumbers = utils.extractROINumbers({roiName});
+    
+    if isempty(roiNumbers)
+        return;
+    end
+    
+    roiNum = roiNumbers(1);
+    
+    % Get from pre-calculated filtering statistics using ROI number as key
     if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
         if isfield(roiInfo.filteringStats, 'roiUpperThresholds') && ...
-           isfield(roiInfo.filteringStats.roiUpperThresholds, roiName)
-            upperThreshold = roiInfo.filteringStats.roiUpperThresholds.(roiName);
+           isa(roiInfo.filteringStats.roiUpperThresholds, 'containers.Map') && ...
+           isKey(roiInfo.filteringStats.roiUpperThresholds, roiNum)
+            upperThreshold = roiInfo.filteringStats.roiUpperThresholds(roiNum);
         end
         
         if isfield(roiInfo.filteringStats, 'roiLowerThresholds') && ...
-           isfield(roiInfo.filteringStats.roiLowerThresholds, roiName)
-            lowerThreshold = roiInfo.filteringStats.roiLowerThresholds.(roiName);
+           isa(roiInfo.filteringStats.roiLowerThresholds, 'containers.Map') && ...
+           isKey(roiInfo.filteringStats.roiLowerThresholds, roiNum)
+            lowerThreshold = roiInfo.filteringStats.roiLowerThresholds(roiNum);
+        end
+    end
+    
+    % NO FALLBACK CALCULATIONS - return NaN if not pre-calculated
+end
+
+function noiseLevel = calculateNoiseLevelFromThreshold(threshold, config)
+    % CALCULATE ONCE: Only used during initial processing phase
+    % Should NOT be called from plotting functions
+    
+    if nargin < 2
+        config = GluSnFRConfig();
+    end
+    
+    if isfinite(threshold)
+        if threshold <= config.thresholds.LOW_NOISE_CUTOFF
+            noiseLevel = 'low';
+        else
+            noiseLevel = 'high';
+        end
+    else
+        noiseLevel = 'unknown';
+    end
+    
+    % Add warning if called from plotting context
+    stack = dbstack();
+    if length(stack) > 1
+        for i = 2:length(stack)
+            if contains(stack(i).name, 'plot_') || contains(stack(i).file, 'plot')
+                warning('calculateNoiseLevelFromThreshold called from plotting function %s - should use pre-calculated values', stack(i).name);
+                break;
+            end
         end
     end
 end

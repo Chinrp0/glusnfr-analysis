@@ -229,7 +229,8 @@ function success = generateCoverslipFigure(figNum, numFigures, csROIs, plotData,
 end
 
 function [threshold, noiseLevel, upperThreshold, lowerThreshold] = getPPFROIData(varName, roiInfo)
-    % OPTIMIZED: Get all PPF ROI data from pre-calculated values
+    % RETRIEVE ONLY: Get all PPF ROI data using existing ROI number extraction
+    % NO FALLBACK CALCULATIONS - return defaults if data not available
     
     threshold = NaN;
     noiseLevel = 'unknown';
@@ -244,53 +245,45 @@ function [threshold, noiseLevel, upperThreshold, lowerThreshold] = getPPFROIData
     
     csCell = roiMatch{1}{1};
     roiNum = str2double(roiMatch{1}{2});
-    roiName = sprintf('ROI %03d', roiNum);
     
-    % Try to get from filtering statistics first
+    % RETRIEVE from pre-calculated filtering statistics using ROI number as key
     if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
+        
+        % Get noise level (pre-calculated)
         if isfield(roiInfo.filteringStats, 'roiNoiseMap') && ...
-           isfield(roiInfo.filteringStats.roiNoiseMap, roiName)
-            noiseLevel = roiInfo.filteringStats.roiNoiseMap.(roiName);
+           isa(roiInfo.filteringStats.roiNoiseMap, 'containers.Map') && ...
+           isKey(roiInfo.filteringStats.roiNoiseMap, roiNum)
+            noiseLevel = roiInfo.filteringStats.roiNoiseMap(roiNum);
         end
         
+        % Get upper threshold (pre-calculated)
         if isfield(roiInfo.filteringStats, 'roiUpperThresholds') && ...
-           isfield(roiInfo.filteringStats.roiUpperThresholds, roiName)
-            upperThreshold = roiInfo.filteringStats.roiUpperThresholds.(roiName);
+           isa(roiInfo.filteringStats.roiUpperThresholds, 'containers.Map') && ...
+           isKey(roiInfo.filteringStats.roiUpperThresholds, roiNum)
+            upperThreshold = roiInfo.filteringStats.roiUpperThresholds(roiNum);
         end
         
+        % Get lower threshold (pre-calculated)
         if isfield(roiInfo.filteringStats, 'roiLowerThresholds') && ...
-           isfield(roiInfo.filteringStats.roiLowerThresholds, roiName)
-            lowerThreshold = roiInfo.filteringStats.roiLowerThresholds.(roiName);
+           isa(roiInfo.filteringStats.roiLowerThresholds, 'containers.Map') && ...
+           isKey(roiInfo.filteringStats.roiLowerThresholds, roiNum)
+            lowerThreshold = roiInfo.filteringStats.roiLowerThresholds(roiNum);
+        end
+        
+        % Get basic threshold (pre-calculated)
+        if isfield(roiInfo.filteringStats, 'roiBasicThresholds') && ...
+           isa(roiInfo.filteringStats.roiBasicThresholds, 'containers.Map') && ...
+           isKey(roiInfo.filteringStats.roiBasicThresholds, roiNum)
+            threshold = roiInfo.filteringStats.roiBasicThresholds(roiNum);
+        end
+        
+        % If we have all pre-calculated data, we're done
+        if ~strcmp(noiseLevel, 'unknown') && ~isnan(upperThreshold)
+            return;
         end
     end
     
-    % Fallback to original method if pre-calculated values not available
-    if strcmp(noiseLevel, 'unknown') || isnan(upperThreshold)
-        try
-            for fileIdx = 1:length(roiInfo.coverslipFiles)
-                fileData = roiInfo.coverslipFiles(fileIdx);
-                if strcmp(fileData.coverslipCell, csCell)
-                    roiIdx = find(fileData.roiNumbers == roiNum, 1);
-                    if ~isempty(roiIdx) && roiIdx <= length(fileData.thresholds)
-                        threshold = fileData.thresholds(roiIdx);
-                        
-                        % Only calculate noise level if not already available
-                        if strcmp(noiseLevel, 'unknown') && isfinite(threshold)
-                            cfg = GluSnFRConfig();
-                            if threshold <= cfg.thresholds.LOW_NOISE_CUTOFF
-                                noiseLevel = 'low';
-                            else
-                                noiseLevel = 'high';
-                            end
-                        end
-                        return;
-                    end
-                end
-            end
-        catch
-            % Silent fallback
-        end
-    end
+    % NO FALLBACK CALCULATIONS - if data isn't pre-calculated, return defaults
 end
 
 function success = generateAveragedPlot(averagedData, config, varargin)

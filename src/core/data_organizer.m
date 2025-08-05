@@ -81,9 +81,14 @@ end
 
 function filteringStats = collectFilteringStats(groupData)
     % Collect filtering statistics from processed files
+    % SIMPLIFIED: Only handle Schmitt data since that's what should be used
     
     filteringStats = struct();
     filteringStats.available = false;
+    filteringStats.method = 'unknown';
+    
+    cfg = GluSnFRConfig();
+    utils = string_utils(cfg);
     
     for i = 1:length(groupData)
         if ~isempty(groupData{i}) && isfield(groupData{i}, 'filterStats')
@@ -94,26 +99,66 @@ function filteringStats = collectFilteringStats(groupData)
                 filteringStats.available = true;
                 filteringStats.method = 'schmitt_trigger';
                 
-                % Store noise classifications mapped to ROI names
+                % Store ALL necessary data using ROI numbers as keys
                 if isfield(groupData{i}, 'roiNames')
                     roiNames = groupData{i}.roiNames;
+                    roiNumbers = utils.extractROINumbers(roiNames);
+                    
+                    % Get Schmitt data
                     noiseClassification = stats.schmitt_info.noise_classification;
                     upperThresholds = stats.schmitt_info.upper_thresholds;
                     lowerThresholds = stats.schmitt_info.lower_thresholds;
                     
-                    for j = 1:length(roiNames)
-                        roiName = roiNames{j};
+                    % Also get basic thresholds if available
+                    basicThresholds = [];
+                    if isfield(groupData{i}, 'thresholds')
+                        basicThresholds = groupData{i}.thresholds;
+                    end
+                    
+                    % Initialize containers.Map for storage
+                    filteringStats.roiNoiseMap = containers.Map('KeyType', 'int32', 'ValueType', 'char');
+                    filteringStats.roiUpperThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
+                    filteringStats.roiLowerThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
+                    filteringStats.roiBasicThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
+                    
+                    % Store using ROI numbers as keys
+                    for j = 1:length(roiNumbers)
+                        roiNum = roiNumbers(j);
                         if j <= length(noiseClassification)
-                            filteringStats.roiNoiseMap.(roiName) = noiseClassification{j};
-                            filteringStats.roiUpperThresholds.(roiName) = upperThresholds(j);
-                            filteringStats.roiLowerThresholds.(roiName) = lowerThresholds(j);
+                            filteringStats.roiNoiseMap(roiNum) = noiseClassification{j};
+                            filteringStats.roiUpperThresholds(roiNum) = upperThresholds(j);
+                            filteringStats.roiLowerThresholds(roiNum) = lowerThresholds(j);
+                            
+                            if ~isempty(basicThresholds) && j <= length(basicThresholds)
+                                filteringStats.roiBasicThresholds(roiNum) = basicThresholds(j);
+                            end
                         end
                     end
                 end
-                break; % Use first available stats
+                
+                % Success - we have Schmitt data
+                return;
+                
+            else
+                % DEBUG: Why is Schmitt data missing?
+                fprintf('DEBUG: No schmitt_info found in filterStats for group %d\n', i);
+                if isfield(stats, 'method')
+                    fprintf('       Filter method used: %s\n', stats.method);
+                end
+                fprintf('       Available fields: %s\n', strjoin(fieldnames(stats), ', '));
             end
         end
     end
+    
+    % If we get here, no Schmitt data was found
+    if cfg.filtering.USE_SCHMITT_TRIGGER
+        warning('Schmitt trigger is enabled but no Schmitt data found in any group files!');
+        fprintf('This suggests a problem with the Schmitt filter data storage.\n');
+        fprintf('Check that roi_filter is properly storing schmitt_info in filterStats.\n');
+    end
+    
+    % REMOVED: buildFromBasicThresholds fallback
+    % If Schmitt is enabled, it should work. If it doesn't, we need to fix it.
 end
 
 function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData, groupMetadata, groupKey, cfg)
