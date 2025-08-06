@@ -20,7 +20,7 @@ function modules = module_loader()
         modules.calc = df_calculator();
         modules.filter = roi_filter(); 
         
-        % Step 4: Load I/O modules (UPDATED for split reader/writer)
+        % Step 4: Load I/O modules
         fprintf('  Loading I/O modules...\n');
         modules.io.reader = excel_reader();
         modules.io.writer = excel_writer();
@@ -68,7 +68,7 @@ function validateAllModules(modules)
 end
 
 function testResults = runModuleTests(modules)
-    % Run quick functionality tests for each module (UPDATED for split IO)
+    % Run quick functionality tests for each module
     
     testResults = false(7, 1);
     
@@ -91,18 +91,20 @@ function testResults = runModuleTests(modules)
         useGPU = modules.calc.shouldUseGPU(50000, false, struct('memory', 4), modules.config);
         testResults(4) = true;  % Function exists and runs
         
-        % Test 5: ROI filter
+        % Test 5: ROI filter (Schmitt trigger only)
         assert(isfield(modules.filter, 'filterROIs'), 'Filter missing main function');
+        assert(isfield(modules.filter, 'applySchmittTrigger'), 'Filter missing Schmitt trigger function');
+        assert(isfield(modules.filter, 'calculateSchmittThresholds'), 'Filter missing threshold calculation');
         testResults(5) = true;
         
-        % Test 6: I/O operations (UPDATED for split reader/writer)
+        % Test 6: I/O operations
         assert(isfield(modules.io, 'reader'), 'IO missing reader module');
         assert(isfield(modules.io, 'writer'), 'IO missing writer module');
         assert(isfield(modules.io.reader, 'readFile'), 'Reader missing readFile function');
         assert(isfield(modules.io.writer, 'writeResults'), 'Writer missing writeResults function');
         testResults(6) = true;
 
-        % Test 7: Plot controller (NEW)
+        % Test 7: Plot controller
         assert(isfield(modules.plot, 'generateGroupPlots'), 'Plot controller missing main function');
         assert(isfield(modules.plot, 'shouldUseParallel'), 'Plot controller missing parallel function');
         testResults(7) = true;
