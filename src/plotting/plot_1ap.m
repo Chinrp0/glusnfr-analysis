@@ -1,13 +1,6 @@
 function plot1AP = plot_1ap()
     % PLOT_1AP - FIXED 1AP experiment plotting with centralized colors and proper thresholds
-    % 
-    % FIXES:
-    % - Centralized trial color system with consistent mapping
-    % - Proper threshold length (150ms window around stimulus)
-    % - One threshold line per trial in each subplot
-    % - Eliminated fallback/legacy logic
-    % - Fixed legend color consistency
-    
+
     plot1AP.execute = @executePlotTask;
     plot1AP.generateTrials = @generateTrialsPlot;
     plot1AP.generateAverages = @generateAveragesPlot;
@@ -216,10 +209,12 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
                         'LineWidth', plotConfig.lines.trace);
                     h_line.Color(4) = plotConfig.transparency;
                     
-                    % FIXED: Add threshold line for this specific trial
                     if isfinite(displayThreshold) && displayThreshold > 0
+                        % Calculate small offset based on trial index (0.1% of threshold value per trial)
+                        offsetAmount = displayThreshold * 0.001 * (trialIdx - 1);
+                        
                         addThresholdLineForTrial(timeData_ms, stimulusTime_ms, displayThreshold, ...
-                                               traceColor, roiNoiseLevel, plotConfig);
+                                               traceColor, roiNoiseLevel, plotConfig, offsetAmount);
                     end
                     
                     % Store for legend (only if first subplot)
@@ -270,8 +265,9 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
     close(fig);
 end
 
-function addThresholdLineForTrial(timeData_ms, stimulusTime_ms, threshold, traceColor, roiNoiseLevel, plotConfig)
-    % FIXED: Add threshold line with proper 150ms length and trial-specific color
+function addThresholdLineForTrial(timeData_ms, stimulusTime_ms, threshold, traceColor, roiNoiseLevel, plotConfig, trialOffset)
+    % FIXED: Add threshold line with proper 150ms length and trial-specific color with offset
+    % trialOffset: small vertical offset to prevent overlapping (optional, defaults to 0)
     
     % FIXED: Calculate 150ms threshold window around stimulus
     thresholdLength_ms = 150; % Fixed length as specified in requirements
@@ -292,8 +288,14 @@ function addThresholdLineForTrial(timeData_ms, stimulusTime_ms, threshold, trace
             lineStyle = ':';    % Dotted for unknown
     end
     
-    % FIXED: Plot threshold line with trial-specific color and proper length
-    plot([thresholdStart_ms, thresholdEnd_ms], [threshold, threshold], lineStyle, ...
+    % FIXED: Apply small vertical offset to prevent overlapping
+    if nargin < 7 || isempty(trialOffset)
+        trialOffset = 0;
+    end
+    offsetThreshold = threshold + trialOffset;
+    
+    % FIXED: Plot threshold line with trial-specific color, proper length, and offset
+    plot([thresholdStart_ms, thresholdEnd_ms], [offsetThreshold, offsetThreshold], lineStyle, ...
          'Color', traceColor, 'LineWidth', plotConfig.lines.threshold, 'HandleVisibility', 'off');
 end
 
