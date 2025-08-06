@@ -13,7 +13,7 @@ function utils = plot_utilities()
     utils.createLegend = @createLegend;
     utils.addStimulusToLegend = @addStimulusToLegend;
     utils.createTrialLegend = @createTrialLegend;
-    utils.getThresholdStyle = @getThresholdStyle;
+    utils.getThresholdStyle = @getThresholdStyleFixed;  % FIXED function
 
     % CALCULATE ONCE: Only for initial processing
     utils.calculateNoiseLevelFromThreshold = @calculateNoiseLevelFromThreshold;  % Calculate during processing only
@@ -64,31 +64,25 @@ function plotConfig = getPlotConfig(glusnfrConfig)
     plotConfig.colors.bothPeaks = [0, 0, 0];       % Black for both peaks
     plotConfig.colors.singlePeak = [0.8, 0.2, 0.2]; % Red for single peak
     
-    % ENHANCED: Threshold styling by context
+    % FIXED: Threshold styling by context
     plotConfig.threshold = struct();
     plotConfig.threshold.default = struct(...
         'color', [0, 0.8, 0], ...      % Green for averages
         'width', 1.5, ...
         'style', '--', ...
-        'length', 150);
+        'length', '150');
     
-    plotConfig.threshold.lowNoise = struct(...
-        'color', 'match_trace', ...     % Match trace color
+    plotConfig.threshold.individual = struct(...
+        'color', 'match_trace', ...     % Match trace color for individuals
         'width', 1.5, ...
         'style', '--', ...              % Dashed for low noise
-        'length', 150);
-    
-    plotConfig.threshold.highNoise = struct(...
-        'color', 'match_trace', ...     % Match trace color
-        'width', 1.5, ...
-        'style', '-.', ...              % Dash-dot for high noise
-        'length', 150);
+        'length', '150');
     
     plotConfig.threshold.average = struct(...
-        'color', [0, 0.8, 0], ...      % Keep green for averages
+        'color', [0, 0.8, 0], ...      % Green for averages
         'width', 1.5, ...
         'style', '--', ...
-        'length', 150);
+        'length', '150');
     
     % Figure type controls
     plotConfig.figureTypes = struct();
@@ -170,7 +164,7 @@ function [nRows, nCols] = calculateLayout(nSubplots)
 end
 
 function addPlotElements(timeData_ms, stimulusTime_ms, threshold, plotConfig, varargin)
-    % OPTIMIZED: Use pre-calculated noise levels and thresholds
+    % FIXED: Add plot elements with proper threshold handling
     
     % Parse optional inputs
     p = inputParser;
@@ -178,10 +172,10 @@ function addPlotElements(timeData_ms, stimulusTime_ms, threshold, plotConfig, va
     addParameter(p, 'ShowThreshold', true, @islogical);
     addParameter(p, 'PPFTimepoint', [], @isnumeric);
     addParameter(p, 'TraceColor', [], @isnumeric);
-    addParameter(p, 'NoiseLevel', 'unknown', @ischar);     % Pre-calculated noise level
+    addParameter(p, 'NoiseLevel', 'unknown', @ischar);
     addParameter(p, 'PlotType', 'individual', @ischar);
-    addParameter(p, 'UpperThreshold', [], @isnumeric);     % NEW: Pre-calculated upper threshold
-    addParameter(p, 'LowerThreshold', [], @isnumeric);     % NEW: Pre-calculated lower threshold
+    addParameter(p, 'UpperThreshold', [], @isnumeric);
+    addParameter(p, 'LowerThreshold', [], @isnumeric);
     parse(p, varargin{:});
     
     % Set y-limits first
@@ -201,135 +195,65 @@ function addPlotElements(timeData_ms, stimulusTime_ms, threshold, plotConfig, va
         end
     end
     
-    % Add threshold line using pre-calculated values
-    if p.Results.ShowThreshold
-        % Use upper threshold if available, otherwise fall back to basic threshold
+    % FIXED: Add threshold line - this was the main issue
+    if p.Results.ShowThreshold && isfinite(threshold) && threshold > 0
+        % Use upper threshold if available, otherwise use basic threshold
         displayThreshold = threshold;
-        if ~isempty(p.Results.UpperThreshold)
+        if ~isempty(p.Results.UpperThreshold) && isfinite(p.Results.UpperThreshold)
             displayThreshold = p.Results.UpperThreshold;
         end
         
-        if isfinite(displayThreshold)
-            thresholdStyle = getThresholdStyle(plotConfig, p.Results.PlotType, ...
-                                             p.Results.NoiseLevel, p.Results.TraceColor);
-            addThresholdLine(timeData_ms, displayThreshold, thresholdStyle);
-        end
+        % Get appropriate threshold styling
+        thresholdStyle = getThresholdStyleFixed(plotConfig, p.Results.PlotType, ...
+                                              p.Results.NoiseLevel, p.Results.TraceColor);
+        
+        % Add the threshold line
+        addThresholdLineFixed(timeData_ms, displayThreshold, thresholdStyle);
     end
 end
 
-function thresholdStyle = getThresholdStyle(plotConfig, plotType, noiseLevel, traceColor)
-    % NEW: Get appropriate threshold styling based on context
+function thresholdStyle = getThresholdStyleFixed(plotConfig, plotType, noiseLevel, traceColor)
+    % FIXED: Get appropriate threshold styling based on context
     
     if strcmp(plotType, 'average') || strcmp(plotType, 'coverslip')
         % For averages, always use green dashed line
         thresholdStyle = plotConfig.threshold.average;
         
-    elseif strcmp(noiseLevel, 'low')
-        % Low noise: dashed line matching trace color
-        thresholdStyle = plotConfig.threshold.lowNoise;
-        if ~isempty(traceColor) && isnumeric(traceColor) && length(traceColor) == 3
-            thresholdStyle.color = traceColor;
+    else
+        % For individual plots, match trace color
+        thresholdStyle = plotConfig.threshold.individual;
+        
+        % Set color to match trace
+        if ~isempty(traceColor) && isnumeric(traceColor) && length(traceColor) >= 3
+            thresholdStyle.color = traceColor(1:3);  % Ensure RGB only
         else
             thresholdStyle.color = [0, 0, 0]; % Default to black
         end
         
-    elseif strcmp(noiseLevel, 'high')
-        % High noise: dash-dot line matching trace color
-        thresholdStyle = plotConfig.threshold.highNoise;
-        if ~isempty(traceColor) && isnumeric(traceColor) && length(traceColor) == 3
-            thresholdStyle.color = traceColor;
+        % FIXED: Adjust line style based on noise level
+        if strcmp(noiseLevel, 'low')
+            thresholdStyle.style = '--';   % Dashed for low noise
+        elseif strcmp(noiseLevel, 'high')
+            thresholdStyle.style = '-.';   % Dash-dot for high noise
         else
-            thresholdStyle.color = [0, 0, 0]; % Default to black
-        end
-        
-    else
-        % Default: use default styling
-        thresholdStyle = plotConfig.threshold.default;
-        if ~isempty(traceColor) && isnumeric(traceColor) && length(traceColor) == 3
-            thresholdStyle.color = traceColor;
+            thresholdStyle.style = ':';    % Dotted for unknown
         end
     end
 end
 
-function noiseLevel = determineNoiseLevel(threshold, config)
-    % NEW: Determine noise level from threshold value
+function addThresholdLineFixed(timeData_ms, threshold, thresholdStyle)
+    % FIXED: Add threshold line with proper x-range
     
-    if nargin < 2
-        config = GluSnFRConfig();
-    end
+    % Full x-range
+    xRange = [timeData_ms(1), timeData_ms(end)];
     
-    if isfinite(threshold)
-        if threshold <= config.thresholds.LOW_NOISE_CUTOFF
-            noiseLevel = 'low';
-        else
-            noiseLevel = 'high';
-        end
-    else
-        noiseLevel = 'unknown';
-    end
+    % Plot threshold line
+    plot(xRange, [threshold, threshold], ...
+         thresholdStyle.style, 'Color', thresholdStyle.color, ...
+         'LineWidth', thresholdStyle.width, 'HandleVisibility', 'off');
 end
 
-function [noiseLevel, upperThreshold, lowerThreshold, basicThreshold] = ...
-    getROIDataFromCache(roiIdentifier, roiCache)
-    % GETROIDATAFROMCACHE - Fast ROI data retrieval using cache
-    %
-    % REPLACES the multiple lookup functions in plot_utilities.m
-    % This single function retrieves all ROI data in one call
-    %
-    % INPUTS:
-    %   roiIdentifier - Either ROI name (string) or ROI number (numeric)
-    %   roiCache - Pre-computed cache from createROICache
-    %
-    % OUTPUTS:
-    %   noiseLevel - 'low', 'high', or 'unknown'
-    %   upperThreshold - Schmitt upper threshold or NaN
-    %   lowerThreshold - Schmitt lower threshold or NaN  
-    %   basicThreshold - Basic threshold or NaN
-    
-    % Initialize defaults
-    noiseLevel = 'unknown';
-    upperThreshold = NaN;
-    lowerThreshold = NaN;
-    basicThreshold = NaN;
-    
-    % Determine ROI number
-    if isnumeric(roiIdentifier)
-        roiNum = roiIdentifier;
-    elseif ischar(roiIdentifier) || isstring(roiIdentifier)
-        % Extract number from name if needed
-        if isKey(roiCache.nameToIndex, char(roiIdentifier))
-            idx = roiCache.nameToIndex(char(roiIdentifier));
-            if idx <= length(roiCache.numbers)
-                roiNum = roiCache.numbers(idx);
-            else
-                return; % ROI not found
-            end
-        else
-            return; % ROI not in cache
-        end
-    else
-        return; % Invalid input
-    end
-    
-    % Fast lookups using cached maps
-    if roiCache.hasFilteringStats
-        if isKey(roiCache.noiseMap, roiNum)
-            noiseLevel = roiCache.noiseMap(roiNum);
-        end
-        
-        if isKey(roiCache.upperThresholds, roiNum)
-            upperThreshold = roiCache.upperThresholds(roiNum);
-        end
-        
-        if isKey(roiCache.lowerThresholds, roiNum)
-            lowerThreshold = roiCache.lowerThresholds(roiNum);
-        end
-        
-        if isKey(roiCache.basicThresholds, roiNum)
-            basicThreshold = roiCache.basicThresholds(roiNum);
-        end
-    end
-end
+
 
 function noiseLevel = calculateNoiseLevelFromThreshold(threshold, config)
     % CALCULATE ONCE: Only used during initial processing phase
@@ -407,31 +331,6 @@ function addStimulusLine(stimulusTime_ms, currentYLim, stimConfig)
     end
 end
 
-function addThresholdLine(timeData_ms, threshold, thresholdStyle)
-    % ENHANCED: Add threshold line with flexible styling
-    
-    % Determine x-range for threshold line
-    if isnumeric(thresholdStyle.length) && thresholdStyle.length > 0
-        if thresholdStyle.length <= length(timeData_ms)
-            xEnd = timeData_ms(thresholdStyle.length);
-        else
-            xEnd = timeData_ms(end);
-        end
-    else
-        xEnd = timeData_ms(end); % Full length
-    end
-    
-    % Handle special color matching
-    plotColor = thresholdStyle.color;
-    if ischar(plotColor) && strcmp(plotColor, 'match_trace')
-        % This should have been resolved by getThresholdStyle, but fallback to black
-        plotColor = [0, 0, 0];
-    end
-    
-    plot([timeData_ms(1), xEnd], [threshold, threshold], ...
-         thresholdStyle.style, 'Color', plotColor, ...
-         'LineWidth', thresholdStyle.width, 'HandleVisibility', 'off');
-end
 
 function formatSubplot(plotConfig)
     % Apply standard subplot formatting

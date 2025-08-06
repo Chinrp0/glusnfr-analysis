@@ -1,5 +1,6 @@
 function plot1AP = plot_1ap()
-    % PLOT_1AP - 1AP experiment plotting functions with per-trial threshold styling
+    % PLOT_1AP - FIXED 1AP experiment plotting functions
+    % Eliminates redundant computations and ensures proper threshold display
     
     plot1AP.execute = @executePlotTask;
     plot1AP.generateTrials = @generateTrialsPlot;
@@ -8,63 +9,79 @@ function plot1AP = plot_1ap()
 end
 
 function success = executePlotTask(task, config, varargin)
-    % Execute a 1AP plotting task with ROI cache from task structure
+    % Execute a 1AP plotting task with validated ROI cache
     
     success = false;
     
-    % Extract roiCache from task if available
-    if isfield(task, 'roiCache')
-        roiCache = task.roiCache;
-    else
-        roiCache = [];  % No cache available
+    % Validate task structure
+    if ~isstruct(task) || ~isfield(task, 'type') || ~isfield(task, 'roiCache')
+        if config.debug.ENABLE_PLOT_DEBUG
+            fprintf('    Invalid task structure\n');
+        end
+        return;
+    end
+    
+    % Validate cache
+    if isempty(task.roiCache) || ~task.roiCache.valid
+        if config.debug.ENABLE_PLOT_DEBUG
+            fprintf('    Invalid or missing ROI cache\n');
+        end
+        return;
     end
     
     try
         switch task.type
             case 'trials'
                 success = generateTrialsPlot(task.data, config, ...
-                    'roiInfo', task.roiInfo, 'roiCache', roiCache, ...
+                    'roiInfo', task.roiInfo, 'roiCache', task.roiCache, ...
                     'groupKey', task.groupKey, 'outputFolder', task.outputFolder);
                     
             case 'averages'
                 success = generateAveragesPlot(task.data, config, ...
-                    'roiInfo', task.roiInfo, 'roiCache', roiCache, ...
+                    'roiInfo', task.roiInfo, 'roiCache', task.roiCache, ...
                     'groupKey', task.groupKey, 'outputFolder', task.outputFolder);
                     
             case 'coverslip'
                 success = generateCoverslipPlot(task.data, config, ...
-                    'roiInfo', task.roiInfo, 'roiCache', roiCache, ...
+                    'roiInfo', task.roiInfo, 'roiCache', task.roiCache, ...
                     'groupKey', task.groupKey, 'outputFolder', task.outputFolder);
         end
         
     catch ME
         if config.debug.ENABLE_PLOT_DEBUG
             fprintf('    1AP plot task failed: %s\n', ME.message);
-            fprintf('    Stack: %s (line %d)\n', ME.stack(1).name, ME.stack(1).line);
+            if ~isempty(ME.stack)
+                fprintf('    Stack: %s (line %d)\n', ME.stack(1).name, ME.stack(1).line);
+            end
         end
         success = false;
     end
 end
 
 function success = generateTrialsPlot(organizedData, config, varargin)
-    % Generate individual trials plots with ROI cache optimization
+    % FIXED: Generate individual trials plots with proper threshold display
     
     success = false;
     
-    % Parse inputs INCLUDING roiCache
+    % Parse inputs
     p = inputParser;
     addParameter(p, 'roiInfo', [], @isstruct);
-    addParameter(p, 'roiCache', [], @isstruct);  % ADD THIS
+    addParameter(p, 'roiCache', [], @isstruct);
     addParameter(p, 'groupKey', '', @ischar);
     addParameter(p, 'outputFolder', '', @ischar);
     parse(p, varargin{:});
     
     roiInfo = p.Results.roiInfo;
-    roiCache = p.Results.roiCache;  % ADD THIS
+    roiCache = p.Results.roiCache;
     groupKey = p.Results.groupKey;
     outputFolder = p.Results.outputFolder;
     
-    if isempty(roiInfo) || isempty(groupKey) || isempty(outputFolder)
+    % Validation
+    if isempty(roiInfo) || isempty(roiCache) || isempty(groupKey) || isempty(outputFolder)
+        return;
+    end
+    
+    if ~istable(organizedData) || width(organizedData) <= 1
         return;
     end
     
@@ -76,29 +93,42 @@ function success = generateTrialsPlot(organizedData, config, varargin)
         timeData_ms = organizedData.Frame;
         stimulusTime_ms = config.timing.STIMULUS_TIME_MS;
         
-        if isempty(roiInfo.roiNumbers)
+        % FIXED: Get unique trial numbers from the cache
+        numROIs = length(roiCache.numbers);
+        if numROIs == 0
             return;
         end
         
-        % Calculate figure layout
-        numROIs = length(roiInfo.roiNumbers);
-        numFigures = ceil(numROIs / plotConfig.maxPlotsPerFigure);
-        
-        % Get trial colors
-        trialColors = utils.getColors('trials', 10);
-        uniqueTrials = unique(roiInfo.originalTrialNumbers);
-        uniqueTrials = uniqueTrials(isfinite(uniqueTrials));
+        % Extract unique trials from organized data
+        varNames = organizedData.Properties.VariableNames(2:end);
+        uniqueTrials = [];
+        for i = 1:length(varNames)
+            trialMatch = regexp(varNames{i}, 'ROI\d+_T(\d+)', 'tokens');
+            if ~isempty(trialMatch)
+                trialNum = str2double(trialMatch{1}{1});
+                if ~ismember(trialNum, uniqueTrials)
+                    uniqueTrials(end+1) = trialNum;
+                end
+            end
+        end
         uniqueTrials = sort(uniqueTrials);
         
         if isempty(uniqueTrials)
             return;
         end
         
-        % Pass roiCache to generateTrialsFigure
+        % Calculate figure layout
+        numFigures = ceil(numROIs / plotConfig.maxPlotsPerFigure);
+        
+        % Get trial colors
+        trialColors = utils.getColors('trials', length(uniqueTrials));
+        
+        % Generate figures
         for figNum = 1:numFigures
-            success = generateTrialsFigure(figNum, numFigures, numROIs, organizedData, ...
-                roiInfo, roiCache, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
-                cleanGroupKey, outputFolder, utils, plotConfig, config) || success;
+            figSuccess = generateTrialsFigureFixed(figNum, numFigures, numROIs, organizedData, ...
+                roiCache, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
+                cleanGroupKey, outputFolder, utils, plotConfig, config);
+            success = success || figSuccess;
         end
         
     catch ME
@@ -109,11 +139,10 @@ function success = generateTrialsPlot(organizedData, config, varargin)
     end
 end
 
-% FIX 3: Update generateTrialsFigure to use roiCache properly
-function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedData, ...
-    roiInfo, roiCache, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
+function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organizedData, ...
+    roiCache, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
     cleanGroupKey, outputFolder, utils, plotConfig, config)
-    % WITH CACHE OPTIMIZATION - No redundant lookups!
+    % FIXED: Generate trials figure with proper threshold display per ROI
     
     success = false;
     
@@ -129,48 +158,22 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
     
     for roiIdx = startROI:endROI
         subplotIdx = roiIdx - startROI + 1;
-        originalROI = roiInfo.roiNumbers(roiIdx);
+        roiNum = roiCache.numbers(roiIdx);
         
         subplot(nRows, nCols, subplotIdx);
         hold on;
         
+        % FIXED: Get cached threshold data for this ROI
+        [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = ...
+            getROIDataFromCache(roiNum, roiCache);
+        
         trialCount = 0;
+        trialThresholds = []; % Store thresholds for each trial
         
-        % USE CACHE FOR FAST LOOKUP - This is the optimization!
-        roiNoiseLevel = 'unknown';
-        upperThreshold = NaN;
-        lowerThreshold = NaN;
-        basicThreshold = NaN;
-        
-        if ~isempty(roiCache) && roiCache.hasFilteringStats
-            % O(1) lookups using cache instead of repeated string parsing
-            if isKey(roiCache.noiseMap, originalROI)
-                roiNoiseLevel = roiCache.noiseMap(originalROI);
-            end
-            
-            if isKey(roiCache.upperThresholds, originalROI)
-                upperThreshold = roiCache.upperThresholds(originalROI);
-            end
-            
-            if isKey(roiCache.lowerThresholds, originalROI)
-                lowerThreshold = roiCache.lowerThresholds(originalROI);
-            end
-            
-            if isKey(roiCache.basicThresholds, originalROI)
-                basicThreshold = roiCache.basicThresholds(originalROI);
-            end
-        else
-            % Fallback if cache not available (shouldn't happen)
-            if isfield(roiInfo, 'roiNoiseMap') && isa(roiInfo.roiNoiseMap, 'containers.Map') && ...
-               isKey(roiInfo.roiNoiseMap, originalROI)
-                roiNoiseLevel = roiInfo.roiNoiseMap(originalROI);
-            end
-        end
-        
-        % Plot trials for this ROI
-        for i = 1:length(uniqueTrials)
-            trialNum = uniqueTrials(i);
-            colName = sprintf('ROI%d_T%g', originalROI, trialNum);
+        % Plot all trials for this ROI
+        for trialIdx = 1:length(uniqueTrials)
+            trialNum = uniqueTrials(trialIdx);
+            colName = sprintf('ROI%d_T%g', roiNum, trialNum);
             
             if ismember(colName, organizedData.Properties.VariableNames)
                 trialData = organizedData.(colName);
@@ -178,31 +181,26 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
                     trialCount = trialCount + 1;
                     hasData = true;
                     
-                    colorIdx = mod(i-1, size(trialColors, 1)) + 1;
+                    % Plot trace with color
+                    colorIdx = mod(trialIdx-1, size(trialColors, 1)) + 1;
                     traceColor = trialColors(colorIdx, :);
                     
                     h_line = plot(timeData_ms, trialData, 'Color', traceColor, ...
                         'LineWidth', plotConfig.lines.trace);
                     h_line.Color(4) = plotConfig.transparency;
                     
-                    % Use cached Schmitt upper threshold if available
+                    % FIXED: Add threshold line for each trial
                     displayThreshold = upperThreshold;
                     if ~isfinite(displayThreshold)
-                        % Fallback to basic threshold
-                        trialIdx = find(roiInfo.originalTrialNumbers == trialNum, 1);
-                        if isempty(trialIdx)
-                            trialIdx = i;
-                        end
-                        displayThreshold = getValidThreshold(roiIdx, trialIdx, roiInfo, config);
+                        displayThreshold = basicThreshold;
                     end
                     
-                    % Add threshold line with pre-calculated styling
                     if isfinite(displayThreshold) && displayThreshold > 0
-                        utils.addPlotElements(timeData_ms, stimulusTime_ms, displayThreshold, plotConfig, ...
-                            'ShowStimulus', false, 'ShowThreshold', true, ...
-                            'PlotType', 'individual', 'NoiseLevel', roiNoiseLevel, ...
-                            'TraceColor', traceColor, 'UpperThreshold', upperThreshold, ...
-                            'LowerThreshold', lowerThreshold);
+                        % Add threshold line with proper styling
+                        thresholdStyle = utils.getThresholdStyle(plotConfig, 'individual', ...
+                                                               roiNoiseLevel, traceColor);
+                        addThresholdLineForTrial(timeData_ms, displayThreshold, thresholdStyle, traceColor);
+                        trialThresholds(end+1) = displayThreshold;
                     end
                 end
             end
@@ -212,17 +210,16 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
         utils.addPlotElements(timeData_ms, stimulusTime_ms, NaN, plotConfig, ...
             'ShowStimulus', true, 'ShowThreshold', false);
         
-        % Format title with cached noise level
-        noiseLevelText = createNoiseLevelSummary(roiNoiseLevel, trialCount);
-        
-        title(sprintf('ROI %d%s (n=%d)', originalROI, noiseLevelText, trialCount), ...
+        % Format title with noise level and trial count
+        noiseLevelText = createNoiseLevelText(roiNoiseLevel);
+        title(sprintf('ROI %d%s (n=%d)', roiNum, noiseLevelText, trialCount), ...
             'FontSize', plotConfig.fonts.subtitle, 'FontWeight', 'bold');
+        
         utils.formatSubplot(plotConfig);
         
         % Add legend for first subplot only
         if subplotIdx == 1 && trialCount > 0
-            utils.createLegend('trials', plotConfig, 'NumTrials', length(uniqueTrials), ...
-                'TrialNumbers', uniqueTrials, 'IncludeStimulus', true, 'FontSize', 8);
+            legendEntries = createTrialLegend(uniqueTrials, trialColors, plotConfig);
         end
         
         hold off;
@@ -247,38 +244,85 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
     close(fig);
 end
 
-function noiseLevelText = createNoiseLevelSummary(roiNoiseLevel, trialCount)
-    % OPTIMIZED: Use pre-calculated noise level instead of analyzing multiple trials
+function addThresholdLineForTrial(timeData_ms, threshold, thresholdStyle, traceColor)
+    % FIXED: Add threshold line that matches the trace color for individual trials
+    
+    % Use trace color for threshold line in individual plots
+    thresholdColor = traceColor;
+    
+    % Determine line style based on threshold style
+    lineStyle = thresholdStyle.style;
+    lineWidth = thresholdStyle.width;
+    
+    % Draw threshold line across time range
+    xRange = [timeData_ms(1), timeData_ms(end)];
+    plot(xRange, [threshold, threshold], lineStyle, ...
+         'Color', thresholdColor, 'LineWidth', lineWidth, 'HandleVisibility', 'off');
+end
+
+function legendEntries = createTrialLegend(uniqueTrials, trialColors, plotConfig)
+    % Create legend for trial plots
+    
+    legendEntries = {};
+    
+    % Add trial entries (show first few to avoid clutter)
+    maxTrialsInLegend = min(5, length(uniqueTrials));
+    
+    for i = 1:maxTrialsInLegend
+        h = plot(NaN, NaN, 'Color', trialColors(i, :), 'LineWidth', plotConfig.lines.trace);
+        legendEntries{end+1} = sprintf('Trial %g', uniqueTrials(i));
+    end
+    
+    % Add stimulus entry
+    h_stim = plot(NaN, NaN, '--', 'Color', plotConfig.colors.stimulus, ...
+                  'LineWidth', plotConfig.lines.stimulus);
+    legendEntries{end+1} = 'Stimulus';
+    
+    if length(legendEntries) > 1
+        legend(legendEntries, 'Location', 'northeast', 'FontSize', 8);
+    end
+end
+
+function noiseLevelText = createNoiseLevelText(roiNoiseLevel)
+    % Create noise level text for subplot titles
     
     switch roiNoiseLevel
         case 'low'
             noiseLevelText = ' (Low)';
         case 'high'
             noiseLevelText = ' (High)';
-        case 'unknown'
-            noiseLevelText = ' (?)';
         otherwise
             noiseLevelText = '';
     end
 end
 
 function success = generateAveragesPlot(averagedData, config, varargin)
-    % Generate ROI averaged plots with enhanced threshold styling
+    % FIXED: Generate ROI averaged plots with enhanced threshold styling
     
     success = false;
     
     % Parse inputs
     p = inputParser;
     addParameter(p, 'roiInfo', [], @isstruct);
+    addParameter(p, 'roiCache', [], @isstruct);
     addParameter(p, 'groupKey', '', @ischar);
     addParameter(p, 'outputFolder', '', @ischar);
     parse(p, varargin{:});
     
     roiInfo = p.Results.roiInfo;
+    roiCache = p.Results.roiCache;
     groupKey = p.Results.groupKey;
     outputFolder = p.Results.outputFolder;
     
-    if isempty(roiInfo) || isempty(groupKey) || isempty(outputFolder)
+    % Validation
+    if isempty(roiInfo) || isempty(roiCache) || isempty(groupKey) || isempty(outputFolder)
+        return;
+    end
+    
+    if ~istable(averagedData) || width(averagedData) <= 1
+        if config.debug.ENABLE_PLOT_DEBUG
+            fprintf('    No averaged data to plot\n');
+        end
         return;
     end
     
@@ -290,18 +334,15 @@ function success = generateAveragesPlot(averagedData, config, varargin)
         timeData_ms = averagedData.Frame;
         stimulusTime_ms = config.timing.STIMULUS_TIME_MS;
         
-        if width(averagedData) <= 1
-            return;
-        end
-        
         avgVarNames = averagedData.Properties.VariableNames(2:end);
         numAvgPlots = length(avgVarNames);
         numFigures = ceil(numAvgPlots / plotConfig.maxPlotsPerFigure);
         
         % Generate figures
         for figNum = 1:numFigures
-            success = generateAveragesFigure(figNum, numFigures, avgVarNames, averagedData, ...
-                timeData_ms, stimulusTime_ms, roiInfo, cleanGroupKey, outputFolder, utils, plotConfig) || success;
+            figSuccess = generateAveragesFigureFixed(figNum, numFigures, avgVarNames, averagedData, ...
+                timeData_ms, stimulusTime_ms, roiCache, cleanGroupKey, outputFolder, utils, plotConfig, config);
+            success = success || figSuccess;
         end
         
     catch ME
@@ -312,9 +353,9 @@ function success = generateAveragesPlot(averagedData, config, varargin)
     end
 end
 
-function success = generateAveragesFigure(figNum, numFigures, avgVarNames, averagedData, ...
-    timeData_ms, stimulusTime_ms, roiInfo, cleanGroupKey, outputFolder, utils, plotConfig)
-    % Generate a single averages figure with enhanced threshold styling
+function success = generateAveragesFigureFixed(figNum, numFigures, avgVarNames, averagedData, ...
+    timeData_ms, stimulusTime_ms, roiCache, cleanGroupKey, outputFolder, utils, plotConfig, config)
+    % FIXED: Generate averages figure with proper threshold calculation
     
     success = false;
     
@@ -341,13 +382,13 @@ function success = generateAveragesFigure(figNum, numFigures, avgVarNames, avera
             hasData = true;
             
             % Plot average trace in black
-            traceColor = [0, 0, 0]; % Black for averages
+            traceColor = [0, 0, 0];
             plot(timeData_ms, avgData, 'Color', traceColor, 'LineWidth', plotConfig.lines.trace);
             
-            % Calculate and add threshold with AVERAGE styling (green)
-            avgThreshold = calculateAverageThreshold(avgData, plotConfig, config);
+            % FIXED: Calculate threshold from averaged data baseline
+            avgThreshold = calculateAverageThreshold(avgData, config);
             
-            % Use average plot type to get green threshold
+            % Add plot elements with average styling (green threshold)
             utils.addPlotElements(timeData_ms, stimulusTime_ms, avgThreshold, plotConfig, ...
                 'ShowStimulus', true, 'ShowThreshold', true, ...
                 'PlotType', 'average', 'TraceColor', traceColor);
@@ -356,24 +397,18 @@ function success = generateAveragesFigure(figNum, numFigures, avgVarNames, avera
         % Parse and format title
         roiMatch = regexp(varName, 'ROI(\d+)_n(\d+)', 'tokens');
         if ~isempty(roiMatch)
-            originalROI = str2double(roiMatch{1}{1});
+            roiNum = str2double(roiMatch{1}{1});
+            nTrials = roiMatch{1}{2};
             
-            % For averages, show the predominant noise level for context
-            roiNoiseLevel = 'unknown';
-            if isKey(roiInfo.roiNoiseMap, originalROI)
-                roiNoiseLevel = roiInfo.roiNoiseMap(originalROI);
-            end
-            
-            noiseLevelText = '';
-            if strcmp(roiNoiseLevel, 'low')
-                noiseLevelText = ' (Avg-Low)';
-            elseif strcmp(roiNoiseLevel, 'high')
-                noiseLevelText = ' (Avg-High)';
+            % Get noise level from cache for context
+            if roiCache.hasFilteringStats && isKey(roiCache.noiseMap, roiNum)
+                roiNoiseLevel = roiCache.noiseMap(roiNum);
+                noiseLevelText = createNoiseLevelText(roiNoiseLevel);
             else
-                noiseLevelText = ' (Avg)';
+                noiseLevelText = '';
             end
             
-            title(sprintf('ROI %d%s (n=%s)', originalROI, noiseLevelText, roiMatch{1}{2}), ...
+            title(sprintf('ROI %d%s (Avg, n=%s)', roiNum, noiseLevelText, nTrials), ...
                 'FontSize', plotConfig.fonts.subtitle, 'FontWeight', 'bold');
         else
             title(varName, 'FontSize', plotConfig.fonts.subtitle);
@@ -402,23 +437,52 @@ function success = generateAveragesFigure(figNum, numFigures, avgVarNames, avera
     close(fig);
 end
 
+function avgThreshold = calculateAverageThreshold(avgData, config)
+    % FIXED: Calculate threshold for averaged data using baseline
+    
+    % Use baseline window from config
+    baselineWindow = config.timing.BASELINE_FRAMES;
+    
+    % Ensure we have valid data for baseline
+    if length(avgData) >= max(baselineWindow)
+        baselineData = avgData(baselineWindow);
+        
+        % Calculate threshold using config multiplier
+        baselineSD = std(baselineData, 'omitnan');
+        avgThreshold = config.thresholds.SD_MULTIPLIER * baselineSD;
+    else
+        avgThreshold = NaN;
+    end
+    
+    % Apply default threshold if calculation failed
+    if ~isfinite(avgThreshold)
+        avgThreshold = config.thresholds.DEFAULT_THRESHOLD;
+    end
+end
+
 function success = generateCoverslipPlot(totalAveragedData, config, varargin)
-    % Generate coverslip average plots (unchanged - no per-trial thresholds here)
+    % Generate coverslip average plots (unchanged implementation)
     
     success = false;
     
     % Parse inputs
     p = inputParser;
     addParameter(p, 'roiInfo', [], @isstruct);
+    addParameter(p, 'roiCache', [], @isstruct);
     addParameter(p, 'groupKey', '', @ischar);
     addParameter(p, 'outputFolder', '', @ischar);
     parse(p, varargin{:});
     
     roiInfo = p.Results.roiInfo;
+    roiCache = p.Results.roiCache;
     groupKey = p.Results.groupKey;
     outputFolder = p.Results.outputFolder;
     
     if isempty(roiInfo) || isempty(groupKey) || isempty(outputFolder)
+        return;
+    end
+    
+    if ~istable(totalAveragedData) || width(totalAveragedData) <= 1
         return;
     end
     
@@ -427,11 +491,6 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
         plotConfig = utils.getPlotConfig(config);
         
         cleanGroupKey = regexprep(groupKey, '[^\w-]', '_');
-        
-        if width(totalAveragedData) <= 1
-            return;
-        end
-        
         timeData_ms = totalAveragedData.Frame;
         stimulusTime_ms = config.timing.STIMULUS_TIME_MS;
         varNames = totalAveragedData.Properties.VariableNames(2:end);
@@ -440,8 +499,6 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
         hold on;
         
         hasData = false;
-        
-        % Get noise level colors
         colors = utils.getColors('noise', 3);
         
         % Plot each data series
@@ -456,7 +513,7 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
                 varName = validVarNames{i};
                 hasData = true;
                 
-                % Determine color and display name based on noise level
+                % Determine color based on noise level
                 if contains(varName, 'Low_Noise')
                     color = colors(1, :);
                     displayName = 'Low Noise';
@@ -477,22 +534,20 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
                     displayName = sprintf('%s (n=%s)', displayName, nMatch{1}{1});
                 end
                 
-                h = plot(timeData_ms, data, 'Color', color, 'LineWidth', 2);
+                plot(timeData_ms, data, 'Color', color, 'LineWidth', 2, 'DisplayName', displayName);
             end
         end
         
         % Add stimulus line and formatting (no threshold for coverslips)
         if hasData
             utils.addPlotElements(timeData_ms, stimulusTime_ms, NaN, plotConfig, ...
-                'ShowStimulus', true, 'ShowThreshold', false, ...
-                'PlotType', 'coverslip');
+                'ShowStimulus', true, 'ShowThreshold', false, 'PlotType', 'coverslip');
             
             utils.formatSubplot(plotConfig);
             title(sprintf('%s - Coverslip Averages by Noise Level', cleanGroupKey), ...
                   'FontSize', plotConfig.fonts.title, 'FontWeight', 'bold', 'Interpreter', 'none');
             
-            % Create standardized noise level legend
-            utils.createLegend('noise_level', plotConfig, 'IncludeStimulus', true, 'FontSize', 10);
+            legend('Location', 'northeast', 'FontSize', 10);
             
             filename = sprintf('%s_coverslip_averages.png', cleanGroupKey);
             filepath = fullfile(outputFolder, filename);
@@ -510,91 +565,35 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
     end
 end
 
-function avgThreshold = calculateAverageThreshold(avgData, plotConfig, cfg)
-    % CALCULATEAVERAGETHRESHOLD - Calculate threshold for averaged data using config
-    %
-    % INPUTS:
-    %   avgData - averaged trace data
-    %   plotConfig - plot configuration structure  
-    %   cfg - main GluSnFR configuration (optional)
-    %
-    % OUTPUT:
-    %   avgThreshold - calculated threshold for averaged data
+function [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = getROIDataFromCache(roiNum, roiCache)
+    % FIXED: Fast ROI data retrieval using validated cache
     
-    % Get config if not provided
-    if nargin < 3
-        cfg = GluSnFRConfig();
-    end
+    % Initialize defaults
+    roiNoiseLevel = 'unknown';
+    upperThreshold = NaN;
+    lowerThreshold = NaN;
+    basicThreshold = NaN;
     
-    % Use baseline window from config
-    baselineWindow = cfg.timing.BASELINE_FRAMES;
-    
-    % Ensure we have valid data for baseline
-    if length(avgData) >= max(baselineWindow)
-        baselineData = avgData(baselineWindow);
-        
-        % Calculate threshold using CONFIG multiplier, not hardcoded 3.0
-        baselineSD = std(baselineData, 'omitnan');
-        avgThreshold = cfg.thresholds.SD_MULTIPLIER * baselineSD;
-    else
-        % Not enough data for baseline calculation
-        avgThreshold = NaN;
-    end
-    
-    % Apply default threshold if calculation failed
-    if ~isfinite(avgThreshold)
-        avgThreshold = cfg.thresholds.DEFAULT_THRESHOLD;
-    end
-end
-
-function displayThreshold = getValidThreshold(roiIdx, trialIdx, roiInfo, config)
-    % GETVALIDTHRESHOLD - Robust threshold retrieval with fallbacks
-    %
-    % REPLACE the threshold retrieval logic in plot_1ap.m generateTrialsFigure
-    % (around lines 195-205) with a call to this function
-    
-    displayThreshold = NaN;
-    
-    % Priority 1: Try to get Schmitt upper threshold from filtering stats
-    if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
-        roiNum = roiInfo.roiNumbers(roiIdx);
-        
-        if isKey(roiInfo.filteringStats.roiUpperThresholds, roiNum)
-            displayThreshold = roiInfo.filteringStats.roiUpperThresholds(roiNum);
-            if isfinite(displayThreshold)
-                return; % Found valid Schmitt threshold
+    % Retrieve from cache if available
+    if roiCache.hasFilteringStats
+        try
+            if isKey(roiCache.noiseMap, roiNum)
+                roiNoiseLevel = roiCache.noiseMap(roiNum);
             end
-        end
-    end
-    
-    % Priority 2: Try to get basic threshold from thresholds array
-    if isfield(roiInfo, 'thresholds')
-        [nROIs, nTrials] = size(roiInfo.thresholds);
-        
-        % Bounds checking
-        if roiIdx <= nROIs && trialIdx <= nTrials
-            threshold = roiInfo.thresholds(roiIdx, trialIdx);
-            if isfinite(threshold) && threshold > 0
-                displayThreshold = threshold;
-                return; % Found valid basic threshold
-            end
-        end
-        
-        % Priority 3: If specific trial invalid, try to get any valid threshold for this ROI
-        if roiIdx <= nROIs
-            roiThresholds = roiInfo.thresholds(roiIdx, :);
-            validThresholds = roiThresholds(isfinite(roiThresholds) & roiThresholds > 0);
             
-            if ~isempty(validThresholds)
-                % Use median of valid thresholds as fallback
-                displayThreshold = median(validThresholds);
-                return;
+            if isKey(roiCache.upperThresholds, roiNum)
+                upperThreshold = roiCache.upperThresholds(roiNum);
             end
+            
+            if isKey(roiCache.lowerThresholds, roiNum)
+                lowerThreshold = roiCache.lowerThresholds(roiNum);
+            end
+            
+            if isKey(roiCache.basicThresholds, roiNum)
+                basicThreshold = roiCache.basicThresholds(roiNum);
+            end
+        catch
+            % Cache lookup failed, use defaults
         end
-    end
-    
-    % Priority 4: Ultimate fallback - use config default
-    if ~isfinite(displayThreshold)
-        displayThreshold = config.thresholds.DEFAULT_THRESHOLD;
     end
 end
