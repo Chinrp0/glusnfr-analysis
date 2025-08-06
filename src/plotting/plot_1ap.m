@@ -163,7 +163,7 @@ end
 function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organizedData, ...
     roiCache, timeData_ms, stimulusTime_ms, uniqueTrials, globalTrialColorMap, ...
     cleanGroupKey, outputFolder, utils, plotConfig, config)
-    % FIXED: Generate trials figure with proper thresholds and consistent colors
+    % FIXED: Generate trials figure using ONLY cache data for thresholds
     
     success = false;
     
@@ -184,20 +184,31 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
         subplot(nRows, nCols, subplotIdx);
         hold on;
         
-        % Get cached threshold data for this ROI (NO FALLBACK CALCULATIONS)
-        [roiNoiseLevel, upperThreshold, ~, basicThreshold] = ...
+        % FIXED: Get cached threshold data - NO FALLBACK CALCULATIONS
+        [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = ...
             getROIDataFromCache(roiNum, roiCache);
         
         % Determine display threshold (prefer upper threshold from Schmitt filtering)
-        displayThreshold = basicThreshold; % Default
-        if isfinite(upperThreshold)
-            displayThreshold = upperThreshold;
+        displayThreshold = NaN; % Default to invalid
+        if isfinite(upperThreshold) && upperThreshold > 0
+            displayThreshold = upperThreshold; % Use Schmitt upper threshold
+        elseif isfinite(basicThreshold) && basicThreshold > 0
+            displayThreshold = basicThreshold; % Fallback to basic threshold
+        end
+        
+        % VALIDATION: Only proceed if we have valid threshold data
+        if ~isfinite(displayThreshold)
+            if config.debug.ENABLE_PLOT_DEBUG
+                fprintf('    WARNING: ROI %d has no valid threshold data (upper=%.4f, basic=%.4f)\n', ...
+                        roiNum, upperThreshold, basicThreshold);
+            end
+            % Continue with plot but without threshold line
         end
         
         trialCount = 0;
         legendData = struct('handles', [], 'labels', {{}});
         
-        % FIXED: Plot all trials for this ROI with consistent colors and individual thresholds
+        % Plot all trials for this ROI with consistent colors and individual thresholds
         for trialIdx = 1:length(uniqueTrials)
             trialNum = uniqueTrials(trialIdx);
             colName = sprintf('ROI%d_T%g', roiNum, trialNum);
@@ -208,7 +219,7 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
                     trialCount = trialCount + 1;
                     hasData = true;
                     
-                    % FIXED: Get consistent color from global color map
+                    % Get consistent color from global color map
                     traceColor = globalTrialColorMap(num2str(trialNum));
                     
                     % Plot trace
@@ -216,8 +227,8 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
                         'LineWidth', plotConfig.lines.trace);
                     h_line.Color(4) = plotConfig.transparency;
                     
-                    % FIXED: Add threshold line for this specific trial
-                    if isfinite(displayThreshold) && displayThreshold > 0
+                    % FIXED: Add threshold line using EXACT cached value
+                    if isfinite(displayThreshold)
                         addThresholdLineForTrial(timeData_ms, stimulusTime_ms, displayThreshold, ...
                                                traceColor, roiNoiseLevel, plotConfig);
                     end
@@ -236,14 +247,14 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
         utils.addPlotElements(timeData_ms, stimulusTime_ms, NaN, plotConfig, ...
             'ShowStimulus', true, 'ShowThreshold', false);
         
-        % Format title with noise level and trial count
+        % Format title with cached noise level and trial count
         noiseLevelText = createNoiseLevelText(roiNoiseLevel);
         title(sprintf('ROI %d%s (n=%d)', roiNum, noiseLevelText, trialCount), ...
             'FontSize', plotConfig.fonts.subtitle, 'FontWeight', 'bold');
         
         utils.formatSubplot(plotConfig);
         
-        % FIXED: Add legend for first subplot only with consistent colors
+        % Add legend for first subplot only with consistent colors
         if subplotIdx == 1 && ~isempty(legendData.handles)
             legend(legendData.handles, legendData.labels, 'Location', 'northeast', 'FontSize', 8);
         end
@@ -270,19 +281,24 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
     close(fig);
 end
 
-function addThresholdLineForTrial(timeData_ms, stimulusTime_ms, threshold, traceColor, roiNoiseLevel, plotConfig)
-    % FIXED: Add threshold line with proper 150ms length and trial-specific color
+function addThresholdLineForTrial(timeData_ms, ~, threshold, traceColor, roiNoiseLevel, plotConfig)
+    % FIXED: Add threshold line using ONLY the provided threshold value
+    % NO RECALCULATIONS - use exactly what's passed in
     
-    % FIXED: Calculate 150ms threshold window around stimulus
-    thresholdLength_ms = 150; % Fixed length as specified in requirements
-    thresholdStart_ms = 1; % Start 25ms before stimulus
-    thresholdEnd_ms = 750; % End 125ms after stimulus
+    % Only add threshold line if we have a valid threshold
+    if ~isfinite(threshold) || threshold <= 0
+        return; % Don't plot invalid thresholds
+    end
+    
+    % Calculate length of threshold line
+    thresholdStart_ms = 1; % Start 
+    thresholdEnd_ms = 750; % End 
     
     % Ensure threshold window is within time data bounds
     thresholdStart_ms = max(thresholdStart_ms, timeData_ms(1));
     thresholdEnd_ms = min(thresholdEnd_ms, timeData_ms(end));
     
-    % FIXED: Determine line style based on noise level
+    % Determine line style based on noise level
     switch roiNoiseLevel
         case 'low'
             lineStyle = '--';   % Dashed for low noise
@@ -292,14 +308,13 @@ function addThresholdLineForTrial(timeData_ms, stimulusTime_ms, threshold, trace
             lineStyle = ':';    % Dotted for unknown
     end
     
-    % FIXED: Plot threshold line with trial-specific color and proper length
+    % Plot threshold line with trial-specific color and proper length
     plot([thresholdStart_ms, thresholdEnd_ms], [threshold, threshold], lineStyle, ...
          'Color', traceColor, 'LineWidth', plotConfig.lines.threshold, 'HandleVisibility', 'off');
 end
 
-
 function noiseLevelText = createNoiseLevelText(roiNoiseLevel)
-    % Create noise level text for subplot titles
+    % Create noise level text for subplot titles using EXACT cache data
     
     switch roiNoiseLevel
         case 'low'
@@ -307,7 +322,7 @@ function noiseLevelText = createNoiseLevelText(roiNoiseLevel)
         case 'high'
             noiseLevelText = ' (High)';
         otherwise
-            noiseLevelText = '';
+            noiseLevelText = ' (?)'; % Show unknown instead of empty
     end
 end
 
@@ -488,7 +503,6 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
     parse(p, varargin{:});
     
     roiInfo = p.Results.roiInfo;
-    roiCache = p.Results.roiCache;
     groupKey = p.Results.groupKey;
     outputFolder = p.Results.outputFolder;
     
@@ -580,35 +594,58 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
         success = false;
     end
 end
+
 function [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = getROIDataFromCache(roiNum, roiCache)
-    % RETRIEVE ONLY: Fast ROI data retrieval using validated cache (NO FALLBACKS)
+    % FIXED: Cache-only ROI data retrieval - NO FALLBACK CALCULATIONS
+    % This ensures data consistency between plots and metadata
     
-    % Initialize defaults
+    % Initialize defaults (these will be returned if cache lookup fails)
     roiNoiseLevel = 'unknown';
     upperThreshold = NaN;
     lowerThreshold = NaN;
     basicThreshold = NaN;
     
-    % Retrieve from cache if available (NO CALCULATIONS)
+    % ONLY use cache data - NO CALCULATIONS OR FALLBACKS
     if roiCache.hasFilteringStats
         try
-            if isKey(roiCache.noiseMap, roiNum)
+            % Retrieve noise classification
+            if isfield(roiCache, 'noiseMap') && ...
+               isa(roiCache.noiseMap, 'containers.Map') && ...
+               isKey(roiCache.noiseMap, roiNum)
                 roiNoiseLevel = roiCache.noiseMap(roiNum);
             end
             
-            if isKey(roiCache.upperThresholds, roiNum)
+            % Retrieve upper threshold
+            if isfield(roiCache, 'upperThresholds') && ...
+               isa(roiCache.upperThresholds, 'containers.Map') && ...
+               isKey(roiCache.upperThresholds, roiNum)
                 upperThreshold = roiCache.upperThresholds(roiNum);
             end
             
-            if isKey(roiCache.lowerThresholds, roiNum)
+            % Retrieve lower threshold
+            if isfield(roiCache, 'lowerThresholds') && ...
+               isa(roiCache.lowerThresholds, 'containers.Map') && ...
+               isKey(roiCache.lowerThresholds, roiNum)
                 lowerThreshold = roiCache.lowerThresholds(roiNum);
             end
             
-            if isKey(roiCache.basicThresholds, roiNum)
+            % Retrieve basic threshold
+            if isfield(roiCache, 'basicThresholds') && ...
+               isa(roiCache.basicThresholds, 'containers.Map') && ...
+               isKey(roiCache.basicThresholds, roiNum)
                 basicThreshold = roiCache.basicThresholds(roiNum);
             end
-        catch
-            % Cache lookup failed, use defaults (NO FALLBACK CALCULATIONS)
+            
+        catch ME
+            % Cache lookup failed - use defaults
+            cfg = GluSnFRConfig();
+            if cfg.debug.ENABLE_PLOT_DEBUG
+                fprintf('    Cache lookup failed for ROI %d: %s\n', roiNum, ME.message);
+            end
         end
     end
+    
+    % REMOVED: All fallback calculations that created inconsistencies
+    % If cache data isn't available, we return defaults (NaN/unknown)
+    % This forces the issue to be visible rather than hiding it with calculated fallbacks
 end

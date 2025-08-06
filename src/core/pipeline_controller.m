@@ -510,7 +510,7 @@ function [groupData, groupMetadata] = processGroupFiles(filesInGroup, rawMeanFol
 end
 
 function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMatrix, hasGPU, gpuInfo)
-    % UPDATED: Store filtering statistics for plotting
+    % UPDATED: Store filtering statistics for plotting with SD-based processing
     
     fullFilePath = fullfile(fileInfo.folder, fileInfo.name);
     
@@ -535,38 +535,44 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
         error('No valid ROI headers found in %s', fileInfo.name);
     end
     
-    % Extract data and calculate dF/F
+    % Extract data and calculate dF/F with standard deviations
     numericData = single(rawData(:, validColumns));
     timeData_ms = single((0:(size(numericData, 1)-1))' * cfg.timing.MS_PER_FRAME);
-    [dF_values, thresholds, gpuUsed] = calc.calculate(numericData, hasGPU, gpuInfo);
+    
+    % UPDATED: Get standard deviations instead of basic thresholds
+    [dF_values, standardDeviations, gpuUsed] = calc.calculate(numericData, hasGPU, gpuInfo);
     
     % Extract experiment info
     [trialNum, expType, ppiValue, coverslipCell] = utils.extractTrialOrPPI(fileInfo.name);
     
-    % Apply filtering (THIS IS WHERE SCHMITT RESULTS ARE GENERATED)
+    % UPDATED: Apply filtering using standard deviations
     if strcmp(expType, 'PPF') && isfinite(ppiValue)
-        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
-            filter.filterROIs(dF_values, validHeaders, thresholds, 'PPF', ppiValue);
+        [finalDFValues, finalHeaders, finalStandardDeviations, filterStats] = ...
+            filter.filterROIs(dF_values, validHeaders, standardDeviations, 'PPF', ppiValue);
     else
-        [finalDFValues, finalHeaders, finalThresholds, filterStats] = ...
-            filter.filterROIs(dF_values, validHeaders, thresholds, '1AP');
+        [finalDFValues, finalHeaders, finalStandardDeviations, filterStats] = ...
+            filter.filterROIs(dF_values, validHeaders, standardDeviations, '1AP');
     end
     
-    % Prepare output - ENHANCED: Include full filtering statistics
+    % UPDATED: Prepare output with standard deviations and display thresholds
     data = struct();
     data.timeData_ms = timeData_ms;
     data.dF_values = finalDFValues;
     data.roiNames = finalHeaders;
-    data.thresholds = finalThresholds;
+    data.standardDeviations = finalStandardDeviations; % NEW: Store SDs
     data.stimulusTime_ms = cfg.timing.STIMULUS_TIME_MS;
     data.gpuUsed = gpuUsed;
     data.filterStats = filterStats;  % CRITICAL: Include full filter stats
     
-    % ENHANCEMENT: If Schmitt trigger was used, also store original headers mapping
-    if isfield(filterStats, 'schmitt_info')
-        data.originalHeaders = validHeaders;  % For mapping back to original ROI names
-        data.originalThresholds = thresholds; % Original thresholds before filtering
+    % COMPATIBILITY: Calculate display thresholds for Excel output
+    data.thresholds = zeros(size(finalStandardDeviations));
+    for i = 1:length(finalStandardDeviations)
+        data.thresholds(i) = filter.calculateDisplayThreshold(finalStandardDeviations(i), cfg);
     end
+    
+    % ENHANCEMENT: Store original data mapping for reference
+    data.originalHeaders = validHeaders;
+    data.originalStandardDeviations = standardDeviations;
     
     metadata = struct();
     metadata.filename = fileInfo.name;
@@ -580,8 +586,135 @@ function [data, metadata] = processSingleFile(fileInfo, rawMeanFolder, useReadMa
     metadata.experimentType = expType;
     metadata.ppiValue = ppiValue;
     metadata.coverslipCell = coverslipCell;
-    metadata.filteringMethod = filterStats.method;  % Track which filtering method was used
+    metadata.filteringMethod = filterStats.method;
+    metadata.processingMode = 'SD_based'; % NEW: Indicate processing mode
 end
+
+% UPDATED: Updated data organizer call to handle SD-based data
+function filteringStats = collectFilteringStats(groupData)
+    % UPDATED: Collect filtering statistics with SD-based processing support
+    
+    filteringStats = struct();
+    filteringStats.available = false;
+    filteringStats.method = 'unknown';
+    
+    cfg = GluSnFRConfig();
+    
+    if cfg.debug.ENABLE_PLOT_DEBUG
+        fprintf('    Collecting SD-based filtering statistics from %d files...\n', length(groupData));
+    end
+    
+    % Look for the first file with complete Schmitt data
+    for i = 1:length(groupData)
+        if ~isempty(groupData{i}) && isfield(groupData{i}, 'filterStats')
+            stats = groupData{i}.filterStats;
+            
+            % Check for complete Schmitt trigger results with SD support
+            if isfield(stats, 'schmitt_info') && ...
+               isstruct(stats.schmitt_info) && ...
+               isfield(stats.schmitt_info, 'roi_number_to_data') && ...
+               isa(stats.schmitt_info.roi_number_to_data, 'containers.Map') && ...
+               ~isempty(stats.schmitt_info.roi_number_to_data)
+                
+                % FOUND: Complete Schmitt data with SD support
+                masterDataMap = stats.schmitt_info.roi_number_to_data;
+                
+                if cfg.debug.ENABLE_PLOT_DEBUG
+                    fprintf('    Found complete SD-based Schmitt data in file %d with %d ROI mappings\n', ...
+                            i, length(masterDataMap));
+                end
+                
+                % Convert master data map to individual containers.Map objects
+                filteringStats = convertMasterDataToLegacyFormatWithSD(masterDataMap, cfg);
+                
+                % Set availability flags
+                filteringStats.available = true;
+                filteringStats.method = 'schmitt_trigger';
+                filteringStats.processingMode = 'SD_based'; % NEW: Indicate SD-based processing
+                
+                if cfg.debug.ENABLE_PLOT_DEBUG
+                    fprintf('    Successfully converted SD-based data to legacy format:\n');
+                    fprintf('      ROI noise classifications: %d\n', length(filteringStats.roiNoiseMap));
+                    fprintf('      ROI upper thresholds: %d\n', length(filteringStats.roiUpperThresholds));
+                    fprintf('      ROI standard deviations: %d\n', length(filteringStats.roiStandardDeviations));
+                end
+                
+                return; % Exit early with complete data
+            end
+        end
+    end
+    
+    % If we get here, no complete Schmitt data was found
+    if cfg.debug.ENABLE_PLOT_DEBUG
+        fprintf('    No complete SD-based Schmitt data found in any file\n');
+    end
+    
+    filteringStats.available = false;
+    filteringStats.method = 'schmitt_unavailable';
+end
+
+function filteringStats = convertMasterDataToLegacyFormatWithSD(masterDataMap, cfg)
+    % UPDATED: Convert master ROI data map including standard deviations
+    
+    filteringStats = struct();
+    
+    % Create individual maps including SD support
+    filteringStats.roiNoiseMap = containers.Map('KeyType', 'int32', 'ValueType', 'char');
+    filteringStats.roiUpperThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
+    filteringStats.roiLowerThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
+    filteringStats.roiBasicThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
+    filteringStats.roiStandardDeviations = containers.Map('KeyType', 'int32', 'ValueType', 'double'); % NEW
+    
+    % Extract all ROI numbers
+    roiNumbers = cell2mat(keys(masterDataMap));
+    
+    % Convert each ROI's data including SD
+    successCount = 0;
+    for i = 1:length(roiNumbers)
+        try
+            roiNum = roiNumbers(i);
+            roiData = masterDataMap(roiNum);
+            
+            % Validate that roiData contains all required fields (including SD)
+            if isstruct(roiData) && ...
+               isfield(roiData, 'noise_classification') && ...
+               isfield(roiData, 'upper_threshold') && ...
+               isfield(roiData, 'lower_threshold') && ...
+               isfield(roiData, 'display_threshold') && ...
+               isfield(roiData, 'standard_deviation') % NEW: Check for SD
+                
+                % Store in individual maps
+                filteringStats.roiNoiseMap(roiNum) = roiData.noise_classification;
+                filteringStats.roiUpperThresholds(roiNum) = roiData.upper_threshold;
+                filteringStats.roiLowerThresholds(roiNum) = roiData.lower_threshold;
+                filteringStats.roiBasicThresholds(roiNum) = roiData.display_threshold; % Use display threshold
+                filteringStats.roiStandardDeviations(roiNum) = roiData.standard_deviation; % NEW: Store SD
+                
+                successCount = successCount + 1;
+            else
+                if cfg.debug.ENABLE_PLOT_DEBUG
+                    fprintf('    WARNING: ROI %d has incomplete SD-based data structure\n', roiNum);
+                end
+            end
+            
+        catch ME
+            if cfg.debug.ENABLE_PLOT_DEBUG
+                fprintf('    ERROR converting SD-based ROI %d: %s\n', roiNumbers(i), ME.message);
+            end
+        end
+    end
+    
+    if cfg.debug.ENABLE_PLOT_DEBUG
+        fprintf('    Converted %d/%d ROIs to legacy format with SD support\n', successCount, length(roiNumbers));
+    end
+    
+    % Validate that we have some data
+    if successCount == 0
+        error('Failed to convert any SD-based ROI data to legacy format');
+    end
+end
+
+
 
 function result = prepareGroupResult(groupData, groupMetadata, roiInfo, status)
     % Prepare group result summary

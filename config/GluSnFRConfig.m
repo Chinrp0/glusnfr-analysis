@@ -24,6 +24,7 @@ function config = GluSnFRConfig()
     config.thresholds.HIGH_NOISE_MULTIPLIER = 1.5;
     config.thresholds.DEFAULT_THRESHOLD = 0.02;
     config.thresholds.MIN_F0 = 1e-6;
+    config.thresholds.SD_NOISE_CUTOFF = 0.0068; %I added this
    
     %% Filtering Parameters
     config.filtering = struct();

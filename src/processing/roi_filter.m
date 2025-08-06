@@ -1,15 +1,18 @@
 function filter = roi_filter()
-    % ROI_FILTER - Schmitt trigger-based ROI filtering
+    % ROI_FILTER - SIMPLIFIED: SD-based threshold and noise classification
     % 
-    % Simplified version using only Schmitt trigger method for enhanced signal detection
+    % MAJOR CHANGE: Now accepts standard deviations directly from df_calculator
+    % Determines noise level based on SD, not pre-calculated thresholds
+    % Calculates all thresholds from SD using configurable multipliers
     
     filter.filterROIs = @filterROIs;
     filter.applySchmittTrigger = @applySchmittTrigger;
     filter.calculateSchmittThresholds = @calculateSchmittThresholds;
+    filter.calculateDisplayThreshold = @calculateDisplayThreshold; % NEW: For Excel output
 end
 
-function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs(dF_values, headers, thresholds, experimentType, varargin)
-    % Main filtering function using Schmitt trigger method
+function [filteredData, filteredHeaders, filteredStandardDeviations, stats] = filterROIs(dF_values, headers, standardDeviations, experimentType, varargin)
+    % UPDATED: Main filtering function using standard deviations directly
     
     cfg = GluSnFRConfig();
     
@@ -22,25 +25,35 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     
     [n_frames, n_rois] = size(dF_values);
     
-    % Step 1: Remove empty ROIs
+    % STEP 1: Remove empty ROIs and store original mapping
     validMask = ~all(isnan(dF_values), 1) & var(dF_values, 0, 1, 'omitnan') > 0;
+    originalHeaders = headers;
+    originalStandardDeviations = standardDeviations;
+    
     dF_values = dF_values(:, validMask);
     headers = headers(validMask);
-    thresholds = thresholds(validMask);
+    standardDeviations = standardDeviations(validMask);
     [~, n_rois_after_cleanup] = size(dF_values);
     
     if n_rois_after_cleanup == 0
         filteredData = [];
         filteredHeaders = {};
-        filteredThresholds = [];
+        filteredStandardDeviations = [];
         stats = createEmptyStats(experimentType);
         return;
     end
     
-    % Step 2: Calculate Schmitt trigger thresholds
-    [noiseClassification, upperThresholds, lowerThresholds] = calculateSchmittThresholds(thresholds, cfg);
+    % STEP 2: Extract ROI numbers for ALL ROIs (before and after filtering)
+    cfg_temp = GluSnFRConfig();
+    utils = string_utils(cfg_temp);
+    originalROINumbers = utils.extractROINumbers(originalHeaders);
+    cleanROINumbers = utils.extractROINumbers(headers);
     
-    % Step 3: Apply Schmitt trigger for each ROI
+    % STEP 3: Calculate noise levels and thresholds directly from SD
+    [noiseClassification, upperThresholds, lowerThresholds, displayThresholds] = ...
+        calculateSchmittThresholds(standardDeviations, cfg);
+    
+    % STEP 4: Apply Schmitt trigger for each ROI
     schmittMask = false(1, n_rois_after_cleanup);
     schmitt_details = cell(n_rois_after_cleanup, 1);
     
@@ -51,43 +64,188 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
         schmitt_details{roi} = details;
     end
     
-    % Step 4: Apply filtered results
+    % STEP 5: Apply filtered results
     filteredData = dF_values(:, schmittMask);
     filteredHeaders = headers(schmittMask);
-    filteredThresholds = thresholds(schmittMask);
+    filteredStandardDeviations = standardDeviations(schmittMask);
+    filteredROINumbers = cleanROINumbers(schmittMask);
     
-    % Step 5: Generate statistics
-    stats = generateSchmittStats(headers, schmittMask, noiseClassification, ...
-                                upperThresholds, lowerThresholds, thresholds, ...
-                                schmitt_details, experimentType, cfg);
+    % STEP 6: Generate complete statistics with ROI number mapping
+    stats = generateCompleteSchmittStats(originalHeaders, originalStandardDeviations, originalROINumbers, ...
+                                        headers, standardDeviations, cleanROINumbers, ...
+                                        filteredHeaders, filteredStandardDeviations, filteredROINumbers, ...
+                                        schmittMask, noiseClassification, upperThresholds, ...
+                                        lowerThresholds, displayThresholds, schmitt_details, experimentType, cfg);
+    
+    if cfg.debug.ENABLE_PLOT_DEBUG
+        fprintf('    roi_filter: %d→%d→%d ROIs (original→clean→filtered)\n', ...
+                length(originalHeaders), n_rois_after_cleanup, sum(schmittMask));
+        fprintf('    roi_filter: Complete stats generated with %d ROI mappings\n', ...
+                length(stats.schmitt_info.roi_number_to_data));
+    end
 end
 
-function [noiseClassification, upperThresholds, lowerThresholds] = calculateSchmittThresholds(baseThresholds, cfg)
-    % Calculate Schmitt trigger thresholds based on noise classification
+function [noiseClassification, upperThresholds, lowerThresholds, displayThresholds] = calculateSchmittThresholds(standardDeviations, cfg)
+    % UPDATED: Calculate thresholds directly from standard deviations
+    % Noise classification based on SD, not pre-multiplied thresholds
     
-    n_rois = length(baseThresholds);
+    n_rois = length(standardDeviations);
     noiseClassification = cell(n_rois, 1);
     upperThresholds = zeros(n_rois, 1);
     lowerThresholds = zeros(n_rois, 1);
+    displayThresholds = zeros(n_rois, 1); % For Excel output compatibility
+    
+    % UPDATED: Noise cutoff based on standard deviation directly
+    % Old: if basicThreshold (3×SD) <= 0.02 → "low"
+    % New: if SD <= 0.02/3 = 0.0067 → "low"
+    %SD_NOISE_CUTOFF = cfg.thresholds.LOW_NOISE_CUTOFF / cfg.thresholds.SD_MULTIPLIER; d
+    SD_NOISE_CUTOFF = cfg.thresholds.SD_NOISE_CUTOFF;
     
     for i = 1:n_rois
-        threshold = baseThresholds(i);
+        sd = standardDeviations(i);
         
-        % Classify noise level
-        if threshold <= cfg.thresholds.LOW_NOISE_CUTOFF
+        % UPDATED: Classify noise level based on standard deviation
+        if sd <= SD_NOISE_CUTOFF
             noiseClassification{i} = 'low';
-            upperThresholds(i) = threshold * cfg.filtering.schmitt.LOW_NOISE_UPPER_MULT;
-            lowerThresholds(i) = threshold * cfg.filtering.schmitt.LOWER_THRESHOLD_MULT;
+            % Calculate thresholds from SD and multipliers
+            baseThreshold = cfg.thresholds.SD_MULTIPLIER * sd; % This is the "3σ" threshold
+            upperThresholds(i) = baseThreshold * cfg.filtering.schmitt.LOW_NOISE_UPPER_MULT;
+            lowerThresholds(i) = baseThreshold * cfg.filtering.schmitt.LOWER_THRESHOLD_MULT;
         else
             noiseClassification{i} = 'high';
-            upperThresholds(i) = threshold * cfg.filtering.schmitt.HIGH_NOISE_UPPER_MULT;
-            lowerThresholds(i) = threshold * cfg.filtering.schmitt.LOWER_THRESHOLD_MULT;
+            % Calculate thresholds from SD and multipliers
+            baseThreshold = cfg.thresholds.SD_MULTIPLIER * sd; % This is the "3σ" threshold
+            upperThresholds(i) = baseThreshold * cfg.filtering.schmitt.HIGH_NOISE_UPPER_MULT;
+            lowerThresholds(i) = baseThreshold * cfg.filtering.schmitt.LOWER_THRESHOLD_MULT;
+        end
+        
+        % Display threshold for Excel output (traditional 3σ)
+        displayThresholds(i) = cfg.thresholds.SD_MULTIPLIER * sd;
+    end
+    
+    if cfg.debug.ENABLE_PLOT_DEBUG
+        lowCount = sum(strcmp(noiseClassification, 'low'));
+        highCount = sum(strcmp(noiseClassification, 'high'));
+        fprintf('    Noise classification: %d low, %d high (SD cutoff: %.4f)\n', ...
+                lowCount, highCount, SD_NOISE_CUTOFF);
+    end
+end
+
+function displayThreshold = calculateDisplayThreshold(standardDeviation, cfg)
+    % NEW: Calculate display threshold for Excel output from standard deviation
+    % This provides backward compatibility for Excel files that expect "threshold" values
+    
+    if nargin < 2
+        cfg = GluSnFRConfig();
+    end
+    
+    displayThreshold = cfg.thresholds.SD_MULTIPLIER * standardDeviation;
+end
+
+function stats = generateCompleteSchmittStats(originalHeaders, originalStandardDeviations, originalROINumbers, ...
+                                            cleanHeaders, cleanStandardDeviations, cleanROINumbers, ...
+                                            filteredHeaders, filteredStandardDeviations, filteredROINumbers, ...
+                                            schmittMask, noiseClassification, upperThresholds, ...
+                                            lowerThresholds, displayThresholds, schmitt_details, experimentType, cfg)
+    % UPDATED: Generate complete statistics using standard deviations
+    
+    stats = struct();
+    stats.experimentType = experimentType;
+    stats.method = 'Schmitt Trigger';
+    stats.totalROIs = length(originalHeaders);
+    stats.cleanROIs = length(cleanHeaders);
+    stats.passedROIs = sum(schmittMask);
+    stats.filterRate = stats.passedROIs / stats.totalROIs;
+    
+    % Noise level breakdown for passed ROIs only
+    passedNoise = noiseClassification(schmittMask);
+    stats.lowNoiseROIs = sum(strcmp(passedNoise, 'low'));
+    stats.highNoiseROIs = sum(strcmp(passedNoise, 'high'));
+    
+    % Schmitt trigger specific stats
+    triggered_count = sum(cellfun(@(x) x.triggered, schmitt_details));
+    valid_signals_total = sum(cellfun(@(x) x.valid_signals, schmitt_details));
+    invalid_signals_total = sum(cellfun(@(x) x.invalid_signals, schmitt_details));
+    
+    stats.triggered_rois = triggered_count;
+    stats.valid_signals_total = valid_signals_total;
+    stats.invalid_signals_total = invalid_signals_total;
+    stats.trigger_rate = triggered_count / stats.cleanROIs;
+    
+    if triggered_count > 0
+        stats.signal_validity_rate = valid_signals_total / (valid_signals_total + invalid_signals_total);
+    else
+        stats.signal_validity_rate = 0;
+    end
+    
+    % UPDATED: Create complete ROI number-based data mapping with SD
+    stats.schmitt_info = struct();
+    stats.schmitt_info.roi_number_to_data = containers.Map('KeyType', 'int32', 'ValueType', 'any');
+    
+    % Map ALL clean ROIs (not just filtered ones) with their complete data
+    for i = 1:length(cleanROINumbers)
+        roiNum = cleanROINumbers(i);
+        
+        % Store complete data for this ROI
+        roiData = struct();
+        roiData.header = cleanHeaders{i};
+        roiData.standard_deviation = cleanStandardDeviations(i); % NEW: Store SD
+        roiData.display_threshold = displayThresholds(i); % NEW: For Excel compatibility
+        roiData.noise_classification = noiseClassification{i};
+        roiData.upper_threshold = upperThresholds(i);
+        roiData.lower_threshold = lowerThresholds(i);
+        roiData.passed_filtering = schmittMask(i);
+        roiData.schmitt_details = schmitt_details{i};
+        
+        % Store in map using ROI number as key
+        stats.schmitt_info.roi_number_to_data(roiNum) = roiData;
+    end
+    
+    % UPDATED: Legacy format for backward compatibility (using display thresholds)
+    stats.schmitt_info.noise_classification = noiseClassification;
+    stats.schmitt_info.upper_thresholds = upperThresholds;
+    stats.schmitt_info.lower_thresholds = lowerThresholds;
+    stats.schmitt_info.basic_thresholds = displayThresholds; % For Excel compatibility
+    stats.schmitt_info.standard_deviations = cleanStandardDeviations; % NEW: Include SDs
+    stats.schmitt_info.details = schmitt_details;
+    stats.schmitt_info.passed_mask = schmittMask;
+    stats.schmitt_info.roi_numbers = cleanROINumbers;
+    
+    % Store original data for reference
+    stats.original_info = struct();
+    stats.original_info.headers = originalHeaders;
+    stats.original_info.standard_deviations = originalStandardDeviations;
+    stats.original_info.roi_numbers = originalROINumbers;
+    
+    % Configuration used
+    stats.configUsed = cfg.filtering.schmitt;
+    stats.configUsed.sdNoiseCutoff = cfg.thresholds.LOW_NOISE_CUTOFF / cfg.thresholds.SD_MULTIPLIER;
+    stats.configUsed.legacyNoiseCutoff = cfg.thresholds.LOW_NOISE_CUTOFF;
+    
+    % Summary
+    stats.summary = sprintf('%s Schmitt: %d/%d ROIs passed (%.1f%%), %d triggered, %.1f%% signals valid', ...
+        experimentType, stats.passedROIs, stats.totalROIs, stats.filterRate*100, ...
+        stats.triggered_rois, stats.signal_validity_rate*100);
+    
+    if cfg.debug.ENABLE_PLOT_DEBUG
+        fprintf('    Complete stats: %d ROI mappings created with SD-based processing\n', ...
+                length(stats.schmitt_info.roi_number_to_data));
+        
+        % Debug first few ROIs
+        roiKeys = keys(stats.schmitt_info.roi_number_to_data);
+        for i = 1:min(3, length(roiKeys))
+            roiNum = roiKeys{i};
+            roiData = stats.schmitt_info.roi_number_to_data(roiNum);
+            fprintf('    ROI %d: %s noise, SD=%.4f, display_thresh=%.4f, upper=%.4f, passed=%s\n', ...
+                    roiNum, roiData.noise_classification, roiData.standard_deviation, ...
+                    roiData.display_threshold, roiData.upper_threshold, string(roiData.passed_filtering));
         end
     end
 end
 
+% UNCHANGED: These functions remain the same as they work with the calculated thresholds
 function [passes, details] = applySchmittTrigger(trace, upperThreshold, lowerThreshold, experimentType, timepoint_ms, cfg)
-    % Apply Schmitt trigger logic for signal detection
+    % Apply Schmitt trigger logic for signal detection - UNCHANGED
     
     details = struct();
     details.triggered = false;
@@ -172,7 +330,7 @@ function [passes, details] = applySchmittTrigger(trace, upperThreshold, lowerThr
 end
 
 function is_valid = validateSignalCharacteristics(trace, crossing_frame, decay_frame, upperThreshold, lowerThreshold, cfg)
-    % Enhanced signal validation using configurable parameters
+    % Enhanced signal validation using configurable parameters - UNCHANGED
     
     signal_duration = decay_frame - crossing_frame;
     schmitt_params = cfg.filtering.schmitt;
@@ -238,65 +396,8 @@ function is_valid = validateSignalCharacteristics(trace, crossing_frame, decay_f
     is_valid = true;
 end
 
-function stats = generateSchmittStats(headers, schmittMask, noiseClassification, ...
-                                     upperThresholds, lowerThresholds, basicThresholds, ...
-                                     schmitt_details, experimentType, cfg)
-    % Generate comprehensive Schmitt trigger statistics
-    
-    stats = struct();
-    stats.experimentType = experimentType;
-    stats.method = 'Schmitt Trigger';
-    stats.totalROIs = length(headers);
-    stats.passedROIs = sum(schmittMask);
-    stats.filterRate = stats.passedROIs / stats.totalROIs;
-    
-    % Noise level breakdown
-    passedNoise = noiseClassification(schmittMask);
-    stats.lowNoiseROIs = sum(strcmp(passedNoise, 'low'));
-    stats.highNoiseROIs = sum(strcmp(passedNoise, 'high'));
-    
-    % Schmitt trigger specific stats
-    triggered_count = sum(cellfun(@(x) x.triggered, schmitt_details));
-    valid_signals_total = sum(cellfun(@(x) x.valid_signals, schmitt_details));
-    invalid_signals_total = sum(cellfun(@(x) x.invalid_signals, schmitt_details));
-    
-    stats.triggered_rois = triggered_count;
-    stats.valid_signals_total = valid_signals_total;
-    stats.invalid_signals_total = invalid_signals_total;
-    stats.trigger_rate = triggered_count / stats.totalROIs;
-    
-    if triggered_count > 0
-        stats.signal_validity_rate = valid_signals_total / (valid_signals_total + invalid_signals_total);
-    else
-        stats.signal_validity_rate = 0;
-    end
-    
-    % Store Schmitt info for data organizer
-    stats.schmitt_info = struct();
-    stats.schmitt_info.noise_classification = noiseClassification;
-    stats.schmitt_info.upper_thresholds = upperThresholds;
-    stats.schmitt_info.lower_thresholds = lowerThresholds;
-    stats.schmitt_info.basic_thresholds = basicThresholds;
-    stats.schmitt_info.details = schmitt_details;
-    stats.schmitt_info.passed_mask = schmittMask;
-    
-    % Configuration used
-    stats.configUsed = cfg.filtering.schmitt;
-    stats.configUsed.lowNoiseCutoff = cfg.thresholds.LOW_NOISE_CUTOFF;
-    
-    % Create summary string
-    stats.summary = sprintf('%s Schmitt: %d/%d ROIs passed (%.1f%%), %d triggered, %.1f%% signals valid', ...
-        experimentType, stats.passedROIs, stats.totalROIs, stats.filterRate*100, ...
-        stats.triggered_rois, stats.signal_validity_rate*100);
-    
-    if cfg.debug.ENABLE_PLOT_DEBUG
-        fprintf('    Generated Schmitt stats with %d ROIs, %d noise classifications\n', ...
-                length(basicThresholds), length(noiseClassification));
-    end
-end
-
 function stats = createEmptyStats(experimentType)
-    % Create empty stats structure for cases with no ROIs
+    % Create empty stats structure for cases with no ROIs - UPDATED for SD
     
     stats = struct();
     stats.experimentType = experimentType;
@@ -308,10 +409,13 @@ function stats = createEmptyStats(experimentType)
     
     % Empty schmitt_info structure
     stats.schmitt_info = struct();
+    stats.schmitt_info.roi_number_to_data = containers.Map('KeyType', 'int32', 'ValueType', 'any');
     stats.schmitt_info.noise_classification = {};
     stats.schmitt_info.upper_thresholds = [];
     stats.schmitt_info.lower_thresholds = [];
     stats.schmitt_info.basic_thresholds = [];
+    stats.schmitt_info.standard_deviations = []; % NEW: Include SDs
     stats.schmitt_info.details = {};
     stats.schmitt_info.passed_mask = logical([]);
+    stats.schmitt_info.roi_numbers = [];
 end

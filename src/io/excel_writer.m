@@ -3,6 +3,7 @@ function writer = excel_writer()
     
     writer.writeResults = @writeExperimentResults;
     writer.writeSheet = @writeDataSheet;
+    writer.generateMetadata = @generateExperimentMetadata;
     writer.writeLog = @saveLogToFile;
     writer.createDirectories = @createDirectoriesIfNeeded;
 end
@@ -345,7 +346,7 @@ function writeSheetWithCustomHeaders(dataTable, filepath, sheetName, expType, ro
 end
 
 function writeMetadataSheet(organizedData, roiInfo, filepath)
-    % WRITEMETADATASHEET - Write metadata information
+    % UPDATED: Write metadata information with SD-based processing support
     
     try
         analyzer = experiment_analyzer();
@@ -354,6 +355,281 @@ function writeMetadataSheet(organizedData, roiInfo, filepath)
         % Silent failure for metadata
     end
 end
+
+function metadataTable = generateExperimentMetadata(organizedData, roiInfo, filepath)
+    % UPDATED: Generate comprehensive metadata with SD-based thresholds
+    
+    try
+        if strcmp(roiInfo.experimentType, 'PPF')
+            metadataTable = generatePPFMetadataWithSD(organizedData, roiInfo);
+        else
+            metadataTable = generate1APMetadataWithSD(organizedData, roiInfo);
+        end
+        
+        % Save metadata to Excel if table is valid and not empty
+        if istable(metadataTable) && height(metadataTable) > 0
+            try
+                writetable(metadataTable, filepath, 'Sheet', 'ROI_Metadata');
+                % Success - no output to keep interface clean
+            catch ME
+                % Silent failure - metadata is optional, don't crash pipeline
+            end
+        end
+        
+    catch ME
+        % Return empty table on error to prevent pipeline crash
+        metadataTable = table();
+    end
+end
+
+function metadataTable = generate1APMetadataWithSD(organizedData, roiInfo)
+    % UPDATED: Generate 1AP-specific metadata with SD-based processing
+    
+    maxEntries = length(roiInfo.roiNumbers) * roiInfo.numTrials;
+    
+    % Preallocate metadata structure with SD fields
+    allMetadata = repmat(struct(...
+        'ROI_Number', NaN, ...
+        'Trial_Number', NaN, ...
+        'Column_Name', '', ...
+        'Noise_Level', '', ...
+        'Standard_Deviation', NaN, ...          % NEW: Include SD
+        'Display_Threshold_dF_F', NaN, ...      % RENAMED: For clarity
+        'Upper_Threshold_dF_F', NaN, ...        % NEW: Schmitt upper threshold
+        'Lower_Threshold_dF_F', NaN, ...        % NEW: Schmitt lower threshold
+        'Baseline_Mean', NaN, ...
+        'Processing_Mode', '', ...              % NEW: SD_based vs legacy
+        'Experiment_Type', '', ...
+        'Stimulus_Time_ms', NaN), maxEntries, 1);
+    
+    entryCount = 0;
+    cfg = GluSnFRConfig();
+    
+    % Get ROI cache for threshold retrieval
+    cache_manager = roi_cache();
+    roiCache = cache_manager.create(roiInfo, organizedData, '1AP');
+    
+    for roiIdx = 1:length(roiInfo.roiNumbers)
+        roiNum = roiInfo.roiNumbers(roiIdx);
+        
+        % Get complete ROI data from cache (including SD-based data)
+        [noiseLevel, upperThresh, lowerThresh, displayThresh, standardDev] = ...
+            cache_manager.retrieve(roiCache, roiNum);
+        
+        for trialIdx = 1:roiInfo.numTrials
+            trialNum = roiInfo.originalTrialNumbers(trialIdx);
+            
+            if isfinite(trialNum)
+                columnName = sprintf('ROI%d_T%g', roiNum, trialNum);
+                
+                if ismember(columnName, organizedData.Properties.VariableNames)
+                    columnData = organizedData.(columnName);
+                    
+                    if ~all(isnan(columnData))
+                        entryCount = entryCount + 1;
+                        allMetadata(entryCount).ROI_Number = roiNum;
+                        allMetadata(entryCount).Trial_Number = trialNum;
+                        allMetadata(entryCount).Column_Name = columnName;
+                        allMetadata(entryCount).Noise_Level = noiseLevel;
+                        
+                        % NEW: Store SD-based data
+                        if isfinite(standardDev)
+                            allMetadata(entryCount).Standard_Deviation = standardDev;
+                        end
+                        
+                        if isfinite(displayThresh)
+                            allMetadata(entryCount).Display_Threshold_dF_F = displayThresh;
+                        end
+                        
+                        if isfinite(upperThresh)
+                            allMetadata(entryCount).Upper_Threshold_dF_F = upperThresh;
+                        end
+                        
+                        if isfinite(lowerThresh)
+                            allMetadata(entryCount).Lower_Threshold_dF_F = lowerThresh;
+                        end
+                        
+                        allMetadata(entryCount).Baseline_Mean = 0; % dF/F baseline should be ~0
+                        allMetadata(entryCount).Processing_Mode = 'SD_based';
+                        allMetadata(entryCount).Experiment_Type = '1AP';
+                        allMetadata(entryCount).Stimulus_Time_ms = cfg.timing.STIMULUS_TIME_MS;
+                    end
+                end
+            end
+        end
+    end
+    
+    % Convert to table
+    if entryCount > 0
+        allMetadata = allMetadata(1:entryCount);
+        metadataTable = struct2table(allMetadata);
+        
+        % COMPATIBILITY: Add legacy "Threshold_dF_F" column for backward compatibility
+        metadataTable.Threshold_dF_F = metadataTable.Display_Threshold_dF_F;
+        
+    else
+        metadataTable = table();
+    end
+end
+
+function metadataTable = generatePPFMetadataWithSD(organizedData, roiInfo)
+    % UPDATED: Generate PPF-specific metadata with SD-based processing
+    
+    % Calculate maximum entries across all data tables
+    maxEntries = 0;
+    dataFields = {'allData', 'bothPeaks', 'singlePeak'};
+    
+    for fieldIdx = 1:length(dataFields)
+        fieldName = dataFields{fieldIdx};
+        if isfield(organizedData, fieldName)
+            try
+                fieldData = organizedData.(fieldName);
+                if istable(fieldData) && width(fieldData) > 1
+                    maxEntries = maxEntries + (width(fieldData) - 1); % Subtract Frame column
+                end
+            catch
+                continue;
+            end
+        end
+    end
+    
+    if maxEntries == 0
+        metadataTable = table();
+        return;
+    end
+    
+    % Preallocate metadata structure with SD fields
+    allMetadata = repmat(struct(...
+        'CoverslipCell', '', ...
+        'ROI_Number', NaN, ...
+        'Column_Name', '', ...
+        'Peak_Response', '', ...
+        'Noise_Level', '', ...                  % NEW: Include noise level
+        'Standard_Deviation', NaN, ...          % NEW: Include SD
+        'Display_Threshold_dF_F', NaN, ...      % RENAMED: For clarity
+        'Upper_Threshold_dF_F', NaN, ...        % NEW: Schmitt upper threshold
+        'Lower_Threshold_dF_F', NaN, ...        % NEW: Schmitt lower threshold
+        'Baseline_Mean', NaN, ...
+        'Processing_Mode', '', ...              % NEW: SD_based vs legacy
+        'Experiment_Type', '', ...
+        'Timepoint_ms', NaN, ...
+        'Stimulus1_Time_ms', NaN, ...
+        'Stimulus2_Time_ms', NaN), maxEntries, 1);
+    
+    entryCount = 0;
+    cfg = GluSnFRConfig();
+    
+    % Get ROI cache for threshold retrieval
+    cache_manager = roi_cache();
+    roiCache = cache_manager.create(roiInfo, organizedData, 'PPF');
+    
+    % Process each data category
+    for fieldIdx = 1:length(dataFields)
+        fieldName = dataFields{fieldIdx};
+        
+        if ~isfield(organizedData, fieldName)
+            continue;
+        end
+        
+        try
+            dataTable = organizedData.(fieldName);
+            
+            if ~istable(dataTable) || width(dataTable) <= 1
+                continue;
+            end
+            
+            allVarNames = dataTable.Properties.VariableNames;
+            varNames = allVarNames(2:end); % Skip Frame column
+            
+            % Determine peak response classification
+            switch fieldName
+                case 'bothPeaks'
+                    peakResponseType = 'Both';
+                case 'singlePeak'
+                    peakResponseType = 'Single';
+                otherwise
+                    peakResponseType = 'All_Data';
+            end
+            
+            for varIdx = 1:length(varNames)
+                varName = varNames{varIdx};
+                
+                % Parse coverslip and ROI info
+                roiMatch = regexp(varName, '(Cs\d+-c\d+)_ROI(\d+)', 'tokens');
+                if ~isempty(roiMatch)
+                    csCell = roiMatch{1}{1};
+                    roiNum = str2double(roiMatch{1}{2});
+                    
+                    % Check if column exists and has valid data
+                    try
+                        if ismember(varName, allVarNames) && entryCount < maxEntries
+                            columnData = dataTable.(varName);
+                            if ~all(isnan(columnData))
+                                entryCount = entryCount + 1;
+                                
+                                allMetadata(entryCount).CoverslipCell = csCell;
+                                allMetadata(entryCount).ROI_Number = roiNum;
+                                allMetadata(entryCount).Column_Name = varName;
+                                allMetadata(entryCount).Peak_Response = peakResponseType;
+                                
+                                % NEW: Get complete ROI data from cache
+                                [noiseLevel, upperThresh, lowerThresh, displayThresh, standardDev] = ...
+                                    cache_manager.retrieve(roiCache, roiNum);
+                                
+                                allMetadata(entryCount).Noise_Level = noiseLevel;
+                                
+                                if isfinite(standardDev)
+                                    allMetadata(entryCount).Standard_Deviation = standardDev;
+                                end
+                                
+                                if isfinite(displayThresh)
+                                    allMetadata(entryCount).Display_Threshold_dF_F = displayThresh;
+                                end
+                                
+                                if isfinite(upperThresh)
+                                    allMetadata(entryCount).Upper_Threshold_dF_F = upperThresh;
+                                end
+                                
+                                if isfinite(lowerThresh)
+                                    allMetadata(entryCount).Lower_Threshold_dF_F = lowerThresh;
+                                end
+                                
+                                allMetadata(entryCount).Baseline_Mean = 0; % dF/F baseline ~0
+                                allMetadata(entryCount).Processing_Mode = 'SD_based';
+                                allMetadata(entryCount).Experiment_Type = 'PPF';
+                                allMetadata(entryCount).Timepoint_ms = roiInfo.timepoint;
+                                allMetadata(entryCount).Stimulus1_Time_ms = cfg.timing.STIMULUS_TIME_MS;
+                                allMetadata(entryCount).Stimulus2_Time_ms = cfg.timing.STIMULUS_TIME_MS + roiInfo.timepoint;
+                            end
+                        end
+                    catch
+                        continue;
+                    end
+                end
+            end
+            
+        catch
+            continue;
+        end
+    end
+    
+    % Convert to table
+    if entryCount > 0
+        try
+            validMetadata = allMetadata(1:entryCount);
+            metadataTable = struct2table(validMetadata);
+            
+            % COMPATIBILITY: Add legacy "Threshold_dF_F" column for backward compatibility
+            metadataTable.Threshold_dF_F = metadataTable.Display_Threshold_dF_F;
+            
+        catch
+            metadataTable = table();
+        end
+    else
+        metadataTable = table();
+    end
+end
+
 
 function createDirectoriesIfNeeded(directories)
     % CREATEDIRECTORIESIFNEEDED - Create directories if they don't exist

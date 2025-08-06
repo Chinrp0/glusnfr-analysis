@@ -13,6 +13,7 @@ function modules = module_loader()
         % Step 2: Load utility modules (pass config to avoid circular dependencies)
         fprintf('  Loading utilities...\n');
         modules.utils = string_utils(modules.config);  % Pass config to avoid circular dependency
+        modules.cache = roi_cache();
         modules.memory = memory_manager();
         
         % Step 3: Load core processing modules
