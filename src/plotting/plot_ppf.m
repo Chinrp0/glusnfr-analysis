@@ -376,7 +376,8 @@ function success = generateAveragedFigure(figNum, numFigures, avgVarNames, avera
             plot(timeData_ms, avgData, 'Color', traceColor, 'LineWidth', 2.0);
             
             % Calculate threshold for averaged data
-            avgThreshold = calculatePPFAverageThreshold(avgData, plotConfig);
+            avgThreshold = calculateAverageThreshold(avgData, plotConfig, config);
+
             
             % ENHANCED: Use average plot type to get green threshold for averages
             utils.addPlotElements(timeData_ms, stimulusTime_ms1, avgThreshold, plotConfig, ...
@@ -534,19 +535,42 @@ function typeLabel = getPlotTypeLabel(plotSubtype)
     end
 end
 
-function avgThreshold = calculatePPFAverageThreshold(avgData, plotConfig)
-    % Calculate threshold for PPF averaged data
+function avgThreshold = calculateAverageThreshold(avgData, plotConfig, cfg)
+    % CALCULATEAVERAGETHRESHOLD - Calculate threshold for averaged data using config
+    % 
+    % This function should REPLACE the existing calculateAverageThreshold
+    % in both plot_1ap.m (around line 410) and plot_ppf.m (around line 619)
+    %
+    % INPUTS:
+    %   avgData - averaged trace data
+    %   plotConfig - plot configuration structure  
+    %   cfg - main GluSnFR configuration (optional)
+    %
+    % OUTPUT:
+    %   avgThreshold - calculated threshold for averaged data
     
-    baselineWindow = plotConfig.timing.BASELINE_FRAMES;
+    % Get config if not provided
+    if nargin < 3
+        cfg = GluSnFRConfig();
+    end
     
+    % Use baseline window from config
+    baselineWindow = cfg.timing.BASELINE_FRAMES;
+    
+    % Ensure we have valid data for baseline
     if length(avgData) >= max(baselineWindow)
         baselineData = avgData(baselineWindow);
-        avgThreshold = 3.0 * std(baselineData, 'omitnan');  % SD_MULTIPLIER from config
+        
+        % Calculate threshold using CONFIG multiplier, not hardcoded 3.0
+        baselineSD = std(baselineData, 'omitnan');
+        avgThreshold = cfg.thresholds.SD_MULTIPLIER * baselineSD;
     else
+        % Not enough data for baseline calculation
         avgThreshold = NaN;
     end
     
+    % Apply default threshold if calculation failed
     if ~isfinite(avgThreshold)
-        avgThreshold = 0.02;  % DEFAULT_THRESHOLD from config
+        avgThreshold = cfg.thresholds.DEFAULT_THRESHOLD;
     end
 end

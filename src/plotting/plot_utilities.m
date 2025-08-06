@@ -14,10 +14,7 @@ function utils = plot_utilities()
     utils.addStimulusToLegend = @addStimulusToLegend;
     utils.createTrialLegend = @createTrialLegend;
     utils.getThresholdStyle = @getThresholdStyle;
-    % RETRIEVE ONLY: Pre-calculated values using existing string_utils
-    utils.getNoiseLevel = @getNoiseLevel;  % Uses extractROINumbers() from string_utils
-    utils.getSchmittThresholds = @getSchmittThresholds;  % Uses extractROINumbers() from string_utils
-    utils.getBasicThreshold = @getBasicThreshold;  % Uses extractROINumbers() from string_utils
+
     % CALCULATE ONCE: Only for initial processing
     utils.calculateNoiseLevelFromThreshold = @calculateNoiseLevelFromThreshold;  % Calculate during processing only
 end
@@ -272,74 +269,66 @@ function noiseLevel = determineNoiseLevel(threshold, config)
     end
 end
 
-function noiseLevel = getNoiseLevel(roiName, roiInfo)
-    % RETRIEVE ONLY: Get pre-calculated noise level using existing ROI number extraction
+function [noiseLevel, upperThreshold, lowerThreshold, basicThreshold] = ...
+    getROIDataFromCache(roiIdentifier, roiCache)
+    % GETROIDATAFROMCACHE - Fast ROI data retrieval using cache
+    %
+    % REPLACES the multiple lookup functions in plot_utilities.m
+    % This single function retrieves all ROI data in one call
+    %
+    % INPUTS:
+    %   roiIdentifier - Either ROI name (string) or ROI number (numeric)
+    %   roiCache - Pre-computed cache from createROICache
+    %
+    % OUTPUTS:
+    %   noiseLevel - 'low', 'high', or 'unknown'
+    %   upperThreshold - Schmitt upper threshold or NaN
+    %   lowerThreshold - Schmitt lower threshold or NaN  
+    %   basicThreshold - Basic threshold or NaN
     
-    noiseLevel = 'unknown';  % Default when data not available
-    
-    % Use existing string_utils to extract ROI number from name
-    cfg = GluSnFRConfig();
-    utils = string_utils(cfg);
-    roiNumbers = utils.extractROINumbers({roiName});
-    
-    if isempty(roiNumbers)
-        return;
-    end
-    
-    roiNum = roiNumbers(1);
-    
-    % Get from pre-calculated filtering statistics using ROI number as key
-    if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
-        if isfield(roiInfo.filteringStats, 'roiNoiseMap') && ...
-           isa(roiInfo.filteringStats.roiNoiseMap, 'containers.Map') && ...
-           isKey(roiInfo.filteringStats.roiNoiseMap, roiNum)
-            noiseLevel = roiInfo.filteringStats.roiNoiseMap(roiNum);
-            return;
-        end
-    end
-    
-    % For 1AP experiments - check legacy roiNoiseMap
-    if isfield(roiInfo, 'roiNoiseMap') && isa(roiInfo.roiNoiseMap, 'containers.Map') && ...
-       isKey(roiInfo.roiNoiseMap, roiNum)
-        noiseLevel = roiInfo.roiNoiseMap(roiNum);
-    end
-    
-    % NO FALLBACK CALCULATIONS - return 'unknown' if not pre-calculated
-end
-
-function [upperThreshold, lowerThreshold] = getSchmittThresholds(roiName, roiInfo)
-    % RETRIEVE ONLY: Get pre-calculated Schmitt thresholds using existing ROI number extraction
-    
+    % Initialize defaults
+    noiseLevel = 'unknown';
     upperThreshold = NaN;
     lowerThreshold = NaN;
+    basicThreshold = NaN;
     
-    % Use existing string_utils to extract ROI number from name
-    cfg = GluSnFRConfig();
-    utils = string_utils(cfg);
-    roiNumbers = utils.extractROINumbers({roiName});
-    
-    if isempty(roiNumbers)
-        return;
+    % Determine ROI number
+    if isnumeric(roiIdentifier)
+        roiNum = roiIdentifier;
+    elseif ischar(roiIdentifier) || isstring(roiIdentifier)
+        % Extract number from name if needed
+        if isKey(roiCache.nameToIndex, char(roiIdentifier))
+            idx = roiCache.nameToIndex(char(roiIdentifier));
+            if idx <= length(roiCache.numbers)
+                roiNum = roiCache.numbers(idx);
+            else
+                return; % ROI not found
+            end
+        else
+            return; % ROI not in cache
+        end
+    else
+        return; % Invalid input
     end
     
-    roiNum = roiNumbers(1);
-    
-    % Get from pre-calculated filtering statistics using ROI number as key
-    if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
-        if isfield(roiInfo.filteringStats, 'roiUpperThresholds') && ...
-           isa(roiInfo.filteringStats.roiUpperThresholds, 'containers.Map') && ...
-           isKey(roiInfo.filteringStats.roiUpperThresholds, roiNum)
-            upperThreshold = roiInfo.filteringStats.roiUpperThresholds(roiNum);
+    % Fast lookups using cached maps
+    if roiCache.hasFilteringStats
+        if isKey(roiCache.noiseMap, roiNum)
+            noiseLevel = roiCache.noiseMap(roiNum);
         end
         
-        if isfield(roiInfo.filteringStats, 'roiLowerThresholds') && ...
-           isa(roiInfo.filteringStats.roiLowerThresholds, 'containers.Map') && ...
-           isKey(roiInfo.filteringStats.roiLowerThresholds, roiNum)
-            lowerThreshold = roiInfo.filteringStats.roiLowerThresholds(roiNum);
+        if isKey(roiCache.upperThresholds, roiNum)
+            upperThreshold = roiCache.upperThresholds(roiNum);
+        end
+        
+        if isKey(roiCache.lowerThresholds, roiNum)
+            lowerThreshold = roiCache.lowerThresholds(roiNum);
+        end
+        
+        if isKey(roiCache.basicThresholds, roiNum)
+            basicThreshold = roiCache.basicThresholds(roiNum);
         end
     end
-    
-    % NO FALLBACK CALCULATIONS - return NaN if not pre-calculated
 end
 
 function noiseLevel = calculateNoiseLevelFromThreshold(threshold, config)

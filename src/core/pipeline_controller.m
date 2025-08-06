@@ -204,18 +204,7 @@ function [hasParallelToolbox, hasGPU, gpuInfo, poolObj] = setupSystemCapabilitie
         poolObj = setupParallelPool(hasGPU, gpuInfo);
         
         % Configure GPU on workers if available
-        if hasGPU && ~isempty(poolObj)
-            try
-                spmd
-                    if gpuDeviceCount > 0
-                        gpuDevice(1); % Use first GPU
-                    end
-                end
-                fprintf('GPU configuration completed on all workers\n');
-            catch ME
-                fprintf('Warning: GPU configuration on workers failed: %s\n', ME.message);
-            end
-        end
+        configureGPUOnWorkers(hasGPU, gpuInfo);
     end
 end
 
@@ -711,5 +700,76 @@ function validateProcessingResults(groupResults)
     
     if successCount == 0
         error('No groups processed successfully');
+    end
+end
+
+function configureGPUOnWorkers(hasGPU, gpuInfo)
+    % CONFIGUREGPUONWORKERS - Properly configure GPU on parallel workers
+    % Replaces the problematic SPMD block in pipeline_controller.m
+    %
+    % This function should replace lines 234-241 in setupSystemCapabilities
+    % within pipeline_controller.m
+    
+    if hasGPU && ~isempty(gcp('nocreate'))
+        pool = gcp('nocreate');
+        
+        % Check if pool supports SPMD (thread-based pools do)
+        if contains(pool.Cluster.Type, 'Processes', 'IgnoreCase', true)
+            % Process-based pool - use parfeval instead of SPMD
+            fprintf('Configuring GPU on process-based parallel pool...\n');
+            
+            % Configure GPU on each worker using parfeval
+            numWorkers = pool.NumWorkers;
+            futures = parallel.FevalFuture.empty(numWorkers, 0);
+            
+            for w = 1:numWorkers
+                futures(w) = parfeval(@setupWorkerGPU, 1);
+            end
+            
+            % Wait for all workers to complete
+            results = fetchOutputs(futures, 'UniformOutput', false);
+            successCount = sum(cellfun(@(x) x, results));
+            
+            if successCount > 0
+                fprintf('GPU configured on %d/%d workers\n', successCount, numWorkers);
+            else
+                fprintf('Warning: GPU configuration failed on all workers\n');
+            end
+            
+        elseif contains(pool.Cluster.Type, 'Threads', 'IgnoreCase', true)
+            % Thread-based pool - can use SPMD
+            try
+                spmd
+                    if gpuDeviceCount > 0
+                        gpuDevice(1);
+                    end
+                end
+                fprintf('GPU configuration completed on thread-based pool\n');
+            catch ME
+                fprintf('Warning: GPU configuration failed: %s\n', ME.message);
+            end
+            
+        else
+            % Unknown pool type - skip GPU configuration
+            fprintf('Warning: Unknown parallel pool type, skipping GPU configuration\n');
+        end
+    end
+end
+
+function success = setupWorkerGPU()
+    % SETUPWORKERGPU - Configure GPU on a single worker
+    % Helper function for parfeval-based GPU setup
+    
+    success = false;
+    try
+        if gpuDeviceCount > 0
+            gpu = gpuDevice(1);
+            % Warm up the GPU with a small operation
+            dummy = gpuArray(ones(100, 'single'));
+            clear dummy;
+            success = true;
+        end
+    catch
+        success = false;
     end
 end

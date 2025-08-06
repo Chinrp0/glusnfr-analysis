@@ -11,6 +11,7 @@ function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outp
     % Main plotting dispatcher - replaces plot_generator.generateGroupPlots
     
     config = GluSnFRConfig();
+    roiCache = createROICache(roiInfo);
     
     % Quick validation - exit early if no data
     if ~hasValidPlotData(organizedData, roiInfo, config)
@@ -21,8 +22,8 @@ function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outp
     setupPlotEnvironment();
     
     % Create plot tasks based on experiment type and configuration
-    tasks = createPlotTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config);
-    
+    tasks = createPlotTasks(organizedData, averagedData, roiInfo, roiCache, groupKey, outputFolders, config);
+
     if isempty(tasks)
         return;
     end
@@ -44,19 +45,79 @@ function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outp
     cleanupPlotEnvironment();
 end
 
-function tasks = createPlotTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config)
-    % Create plotting tasks based on experiment type and configuration
+function roiCache = createROICache(roiInfo)
+    % CREATEROICACHE - Pre-process ROI data for efficient lookups
+    % 
+    % Call this ONCE at the beginning of plot generation, then pass
+    % the cache to all plotting functions instead of repeatedly extracting
+    % ROI numbers from strings.
+    %
+    % This function should be called in plot_controller.m before 
+    % executing plot tasks (around line 50-60)
+    %
+    % INPUT:
+    %   roiInfo - ROI information structure from data organization
+    %
+    % OUTPUT:
+    %   roiCache - Cached ROI data for fast lookups
+    
+    roiCache = struct();
+    
+    % Create config and utils once
+    cfg = GluSnFRConfig();
+    utils = string_utils(cfg);
+    
+    % Pre-extract all ROI numbers if we have names to process
+    if isfield(roiInfo, 'roiNames') && ~isempty(roiInfo.roiNames)
+        roiCache.numbers = utils.extractROINumbers(roiInfo.roiNames);
+        
+        % Create a map for O(1) lookups: ROI name -> index
+        roiCache.nameToIndex = containers.Map();
+        for i = 1:length(roiInfo.roiNames)
+            roiCache.nameToIndex(roiInfo.roiNames{i}) = i;
+        end
+        
+        % Create a map for O(1) lookups: ROI number -> index  
+        roiCache.numberToIndex = containers.Map('KeyType', 'int32', 'ValueType', 'int32');
+        for i = 1:length(roiCache.numbers)
+            roiCache.numberToIndex(roiCache.numbers(i)) = i;
+        end
+    else
+        % For other experiment types, build cache from available data
+        roiCache.numbers = [];
+        roiCache.nameToIndex = containers.Map();
+        roiCache.numberToIndex = containers.Map('KeyType', 'int32', 'ValueType', 'int32');
+    end
+    
+    % Cache filtering statistics if available
+    if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
+        roiCache.hasFilteringStats = true;
+        roiCache.noiseMap = roiInfo.filteringStats.roiNoiseMap;
+        roiCache.upperThresholds = roiInfo.filteringStats.roiUpperThresholds;
+        roiCache.lowerThresholds = roiInfo.filteringStats.roiLowerThresholds;
+        roiCache.basicThresholds = roiInfo.filteringStats.roiBasicThresholds;
+    else
+        roiCache.hasFilteringStats = false;
+    end
+    
+    % Cache experiment type
+    roiCache.experimentType = roiInfo.experimentType;
+end
+
+
+
+function tasks = createPlotTasks(organizedData, averagedData, roiInfo, roiCache, groupKey, outputFolders, config)    % Create plotting tasks based on experiment type and configuration
     
     tasks = {};
     
     if strcmp(roiInfo.experimentType, 'PPF')
-        tasks = createPPFTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config);
+        tasks = createPPFTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config, roiCache);
     else
-        tasks = create1APTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config);
+        tasks = create1APTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config, roiCache);
     end
 end
 
-function tasks = create1APTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config)
+function tasks = create1APTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config, roiCache)
     % Create 1AP plotting tasks
     
     tasks = {};
@@ -64,26 +125,26 @@ function tasks = create1APTasks(organizedData, averagedData, roiInfo, groupKey, 
     % Individual trials
     if config.plotting.ENABLE_INDIVIDUAL_TRIALS && istable(organizedData) && width(organizedData) > 1
         tasks{end+1} = struct('type', 'trials', 'experimentType', '1AP', ...
-                             'data', organizedData, 'roiInfo', roiInfo, ...
+                             'data', organizedData, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
                              'groupKey', groupKey, 'outputFolder', outputFolders.roi_trials);
     end
     
     % ROI averages
     if config.plotting.ENABLE_ROI_AVERAGES && isfield(averagedData, 'roi') && width(averagedData.roi) > 1
         tasks{end+1} = struct('type', 'averages', 'experimentType', '1AP', ...
-                             'data', averagedData.roi, 'roiInfo', roiInfo, ...
+                             'data', averagedData.roi, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
                              'groupKey', groupKey, 'outputFolder', outputFolders.roi_averages);
     end
     
     % Coverslip averages
     if config.plotting.ENABLE_COVERSLIP_AVERAGES && isfield(averagedData, 'total') && width(averagedData.total) > 1
         tasks{end+1} = struct('type', 'coverslip', 'experimentType', '1AP', ...
-                             'data', averagedData.total, 'roiInfo', roiInfo, ...
+                             'data', averagedData.total, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
                              'groupKey', groupKey, 'outputFolder', outputFolders.coverslip_averages);
     end
 end
 
-function tasks = createPPFTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config)
+function tasks = createPPFTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config, roiCache)
     % Create PPF plotting tasks
     
     tasks = {};
@@ -91,7 +152,7 @@ function tasks = createPPFTasks(organizedData, averagedData, roiInfo, groupKey, 
     % Individual plots
     if config.plotting.ENABLE_PPF_INDIVIDUAL && hasValidPPFData(organizedData)
         tasks{end+1} = struct('type', 'individual', 'experimentType', 'PPF', ...
-                             'data', getPrimaryPPFData(organizedData), 'roiInfo', roiInfo, ...
+                             'data', getPrimaryPPFData(organizedData), 'roiInfo', roiInfo, 'roiCache', roiCache, ...
                              'groupKey', groupKey, 'outputFolder', outputFolders.roi_trials);
     end
     
@@ -99,21 +160,21 @@ function tasks = createPPFTasks(organizedData, averagedData, roiInfo, groupKey, 
     if config.plotting.ENABLE_PPF_AVERAGED && isstruct(averagedData)
         if isfield(averagedData, 'allData') && width(averagedData.allData) > 1
             tasks{end+1} = struct('type', 'averaged', 'experimentType', 'PPF', ...
-                                 'data', averagedData.allData, 'roiInfo', roiInfo, ...
+                                 'data', averagedData.allData, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
                                  'groupKey', groupKey, 'outputFolder', outputFolders.coverslip_averages, ...
                                  'plotSubtype', 'AllData');
         end
         
         if isfield(averagedData, 'bothPeaks') && width(averagedData.bothPeaks) > 1
             tasks{end+1} = struct('type', 'averaged', 'experimentType', 'PPF', ...
-                                 'data', averagedData.bothPeaks, 'roiInfo', roiInfo, ...
+                                 'data', averagedData.bothPeaks, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
                                  'groupKey', groupKey, 'outputFolder', outputFolders.coverslip_averages, ...
                                  'plotSubtype', 'BothPeaks');
         end
         
         if isfield(averagedData, 'singlePeak') && width(averagedData.singlePeak) > 1
             tasks{end+1} = struct('type', 'averaged', 'experimentType', 'PPF', ...
-                                 'data', averagedData.singlePeak, 'roiInfo', roiInfo, ...
+                                 'data', averagedData.singlePeak, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
                                  'groupKey', groupKey, 'outputFolder', outputFolders.coverslip_averages, ...
                                  'plotSubtype', 'SinglePeak');
         end
@@ -163,8 +224,10 @@ function plotsGenerated = executePlotTasksParallel(tasks)
                 if success
                     plotsGenerated = plotsGenerated + 1;
                 end
-            catch
-                % Silent failure for individual tasks
+            catch ME
+                if config.debug.ENABLE_PLOT_DEBUG
+                    fprintf('    Task %d failed (parallel): %s\n', i, ME.message);
+                end
             end
         end
         

@@ -126,27 +126,8 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
         trialCount = 0;
         
         % Pre-calculate noise level for this ROI (avoid recalculation in loop)
-        roiNoiseLevel = 'unknown';
-        if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
-            % Try to find noise level from first valid trial
-            for i = 1:length(uniqueTrials)
-                trialNum = uniqueTrials(i);
-                colName = sprintf('ROI%d_T%g', originalROI, trialNum);
-                if ismember(colName, organizedData.Properties.VariableNames)
-                    roiNoiseLevel = utils.getNoiseLevel(sprintf('ROI %03d', originalROI), roiInfo);
-                    break;
-                end
-            end
-        else
-            % Fallback to roiNoiseMap
-            if isKey(roiInfo.roiNoiseMap, originalROI)
-                roiNoiseLevel = roiInfo.roiNoiseMap(originalROI);
-            end
-        end
-        
-        % Get pre-calculated Schmitt thresholds if available
         roiName = sprintf('ROI %03d', originalROI);
-        [upperThreshold, lowerThreshold] = utils.getSchmittThresholds(roiName, roiInfo);
+        [roiNoiseLevel, upperThreshold, lowerThreshold, ~] = getROIDataFromCache(roiName, roiCache);
         
         % Plot trials for this ROI
         for i = 1:length(uniqueTrials)
@@ -167,17 +148,12 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
                     h_line.Color(4) = plotConfig.transparency;
                     
                     % Use appropriate threshold for display
-                    displayThreshold = NaN;
-                    if ~isnan(upperThreshold)
-                        displayThreshold = upperThreshold;  % Use Schmitt upper threshold
-                    else
-                        % Fallback to basic threshold
-                        trialIdx = find(roiInfo.originalTrialNumbers == trialNum, 1);
-                        if ~isempty(trialIdx) && roiIdx <= size(roiInfo.thresholds, 1) && ...
-                           trialIdx <= size(roiInfo.thresholds, 2)
-                            displayThreshold = roiInfo.thresholds(roiIdx, trialIdx);
-                        end
-                    end
+                   trialIdx = find(roiInfo.originalTrialNumbers == trialNum, 1);
+                   if isempty(trialIdx)
+                       trialIdx = i; % Use loop index as fallback
+                   end
+                   displayThreshold = getValidThreshold(roiIdx, trialIdx, roiInfo, config);
+
                     
                     % Add threshold line with pre-calculated styling
                     if isfinite(displayThreshold)
@@ -328,7 +304,7 @@ function success = generateAveragesFigure(figNum, numFigures, avgVarNames, avera
             plot(timeData_ms, avgData, 'Color', traceColor, 'LineWidth', plotConfig.lines.trace);
             
             % Calculate and add threshold with AVERAGE styling (green)
-            avgThreshold = calculateAverageThreshold(avgData, plotConfig);
+            avgThreshold = calculateAverageThreshold(avgData, plotConfig, config);
             
             % Use average plot type to get green threshold
             utils.addPlotElements(timeData_ms, stimulusTime_ms, avgThreshold, plotConfig, ...
@@ -493,19 +469,91 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
     end
 end
 
-function avgThreshold = calculateAverageThreshold(avgData, plotConfig)
-    % Calculate threshold for averaged data
+function avgThreshold = calculateAverageThreshold(avgData, plotConfig, cfg)
+    % CALCULATEAVERAGETHRESHOLD - Calculate threshold for averaged data using config
+    %
+    % INPUTS:
+    %   avgData - averaged trace data
+    %   plotConfig - plot configuration structure  
+    %   cfg - main GluSnFR configuration (optional)
+    %
+    % OUTPUT:
+    %   avgThreshold - calculated threshold for averaged data
     
-    baselineWindow = plotConfig.timing.BASELINE_FRAMES;
+    % Get config if not provided
+    if nargin < 3
+        cfg = GluSnFRConfig();
+    end
     
+    % Use baseline window from config
+    baselineWindow = cfg.timing.BASELINE_FRAMES;
+    
+    % Ensure we have valid data for baseline
     if length(avgData) >= max(baselineWindow)
         baselineData = avgData(baselineWindow);
-        avgThreshold = 3.0 * std(baselineData, 'omitnan');  % SD_MULTIPLIER hardcoded
+        
+        % Calculate threshold using CONFIG multiplier, not hardcoded 3.0
+        baselineSD = std(baselineData, 'omitnan');
+        avgThreshold = cfg.thresholds.SD_MULTIPLIER * baselineSD;
     else
+        % Not enough data for baseline calculation
         avgThreshold = NaN;
     end
     
+    % Apply default threshold if calculation failed
     if ~isfinite(avgThreshold)
-        avgThreshold = 0.02;  % DEFAULT_THRESHOLD hardcoded
+        avgThreshold = cfg.thresholds.DEFAULT_THRESHOLD;
+    end
+end
+
+function displayThreshold = getValidThreshold(roiIdx, trialIdx, roiInfo, config)
+    % GETVALIDTHRESHOLD - Robust threshold retrieval with fallbacks
+    %
+    % REPLACE the threshold retrieval logic in plot_1ap.m generateTrialsFigure
+    % (around lines 195-205) with a call to this function
+    
+    displayThreshold = NaN;
+    
+    % Priority 1: Try to get Schmitt upper threshold from filtering stats
+    if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
+        roiNum = roiInfo.roiNumbers(roiIdx);
+        
+        if isKey(roiInfo.filteringStats.roiUpperThresholds, roiNum)
+            displayThreshold = roiInfo.filteringStats.roiUpperThresholds(roiNum);
+            if isfinite(displayThreshold)
+                return; % Found valid Schmitt threshold
+            end
+        end
+    end
+    
+    % Priority 2: Try to get basic threshold from thresholds array
+    if isfield(roiInfo, 'thresholds')
+        [nROIs, nTrials] = size(roiInfo.thresholds);
+        
+        % Bounds checking
+        if roiIdx <= nROIs && trialIdx <= nTrials
+            threshold = roiInfo.thresholds(roiIdx, trialIdx);
+            if isfinite(threshold) && threshold > 0
+                displayThreshold = threshold;
+                return; % Found valid basic threshold
+            end
+        end
+        
+        % Priority 3: If specific trial invalid, try to get any valid threshold for this ROI
+        if roiIdx <= nROIs
+            roiThresholds = roiInfo.thresholds(roiIdx, :);
+            validThresholds = roiThresholds(isfinite(roiThresholds) & roiThresholds > 0);
+            
+            if ~isempty(validThresholds)
+                % Use median of valid thresholds as fallback
+                displayThreshold = median(validThresholds);
+                return;
+            end
+        end
+    end
+    
+    % Priority 4: Ultimate fallback - use config default
+    if ~isfinite(displayThreshold)
+        displayThreshold = config.thresholds.DEFAULT_THRESHOLD;
     end
 end

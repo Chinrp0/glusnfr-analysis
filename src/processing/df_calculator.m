@@ -278,11 +278,3 @@ function [dF_values, thresholds] = calculateCPUOptimized(traces, cfg)
     thresholds = cfg.thresholds.SD_MULTIPLIER * std(baseline_dF_F, 1, 'omitnan');
     thresholds(isnan(thresholds)) = cfg.thresholds.DEFAULT_THRESHOLD;
 end
-
-function result = ternary(condition, trueVal, falseVal)
-    if condition
-        result = trueVal;
-    else
-        result = falseVal;
-    end
-end
