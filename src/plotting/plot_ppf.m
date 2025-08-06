@@ -228,8 +228,8 @@ function success = generateCoverslipFigure(figNum, numFigures, csROIs, plotData,
     close(fig);
 end
 
-function [threshold, noiseLevel, upperThreshold, lowerThreshold] = getPPFROIData(varName, roiInfo)
-    % RETRIEVE ONLY: Get all PPF ROI data using existing ROI number extraction
+function [threshold, noiseLevel, upperThreshold, lowerThreshold, standardDeviation] = getPPFROIData(varName, roiInfo)
+% RETRIEVE ONLY: Get all PPF ROI data using existing ROI number extraction
     % NO FALLBACK CALCULATIONS - return defaults if data not available
     
     threshold = NaN;
@@ -271,10 +271,16 @@ function [threshold, noiseLevel, upperThreshold, lowerThreshold] = getPPFROIData
         end
         
         % Get basic threshold (pre-calculated)
-        if isfield(roiInfo.filteringStats, 'roiBasicThresholds') && ...
-           isa(roiInfo.filteringStats.roiBasicThresholds, 'containers.Map') && ...
-           isKey(roiInfo.filteringStats.roiBasicThresholds, roiNum)
-            threshold = roiInfo.filteringStats.roiBasicThresholds(roiNum);
+        if isfield(roiInfo.filteringStats, 'roiStandardDeviations') && ...
+           isa(roiInfo.filteringStats.roiStandardDeviations, 'containers.Map') && ...
+           isKey(roiInfo.filteringStats.roiStandardDeviations, roiNum)
+            standardDeviation = roiInfo.filteringStats.roiStandardDeviations(roiNum);
+            % Calculate threshold from standard deviation if needed for display
+            if strcmp(noiseLevel, 'low')
+                threshold = 3.0 * standardDeviation;  % Use config values
+            else
+                threshold = 3.5 * standardDeviation;  % Use config values  
+            end
         end
         
         % If we have all pre-calculated data, we're done

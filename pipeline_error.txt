@@ -1,9 +1,8 @@
 GluSnFR Pipeline Error Report
-Time: 06-Aug-2025 14:42:25
-Error: Module loading failed: Module validation failed: 3/7 tests failed
-Stack: validateAllModules
+Time: 06-Aug-2025 19:20:55
+Error: No groups processed successfully
 
 Stack Trace:
-  module_loader (line 42)
-  runMainPipeline (line 46)
+  validateProcessingResults (line 703)
+  runMainPipeline (line 86)
   main_glusnfr_pipeline (line 28)

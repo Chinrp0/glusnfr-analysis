@@ -1,5 +1,5 @@
 function config = GluSnFRConfig()
-    % GLUSNFRCONFIG - Performance-optimized configuration with enhanced plotting controls
+    % GLUSNFRCONFIG - Simplified and performance-optimized configuration
     
     %% Version Info
     version_info = PipelineVersion();
@@ -17,14 +17,12 @@ function config = GluSnFRConfig()
     config.timing.BASELINE_FRAMES = 1:200;
     config.timing.POST_STIMULUS_WINDOW = 30;
     
-    %% Threshold Parameters
+    %% Simplified Threshold Parameters
     config.thresholds = struct();
-    config.thresholds.SD_MULTIPLIER = 3;
-    config.thresholds.LOW_NOISE_CUTOFF = 0.02;
-    config.thresholds.HIGH_NOISE_MULTIPLIER = 1.5;
-    config.thresholds.DEFAULT_THRESHOLD = 0.02;
-    config.thresholds.MIN_F0 = 1e-6;
-    config.thresholds.SD_NOISE_CUTOFF = 0.0068; %I added this
+    config.thresholds.LOW_NOISE_SIGMA = 3.0;        % Direct sigma multiplier for low noise ROIs
+    config.thresholds.HIGH_NOISE_SIGMA = 3.5;       % Direct sigma multiplier for high noise ROIs  
+    config.thresholds.LOWER_SIGMA = 1.5;            % Direct sigma multiplier for lower threshold
+    config.thresholds.SD_NOISE_CUTOFF = 0.0068;     % Standard deviation cutoff for noise classification
    
     %% Filtering Parameters
     config.filtering = struct();
@@ -35,14 +33,9 @@ function config = GluSnFRConfig()
     config.filtering.ENABLE_DUPLICATE_REMOVAL = false;
     config.filtering.ENABLE_ENHANCED_FILTERING = false;
     
-    % NEW: Schmitt Trigger Filtering Parameters
-    config.filtering.USE_SCHMITT_TRIGGER = true;  % Enable Schmitt trigger as default
+    % Schmitt Trigger Filtering Parameters
+    config.filtering.USE_SCHMITT_TRIGGER = true;
     config.filtering.schmitt = struct();
-    
-    % Schmitt threshold multipliers
-    config.filtering.schmitt.LOW_NOISE_UPPER_MULT = 1.0;      % 3σ for low noise
-    config.filtering.schmitt.HIGH_NOISE_UPPER_MULT = 1.1667;   % 3.5σ for high noise
-    config.filtering.schmitt.LOWER_THRESHOLD_MULT = 0.5;      % 1.5σ for reset threshold
     
     % Search windows (frames)
     config.filtering.schmitt.POST_STIM_SEARCH_FRAMES = 50;    % Extended search window
@@ -57,14 +50,18 @@ function config = GluSnFRConfig()
     config.filtering.schmitt.SHORT_SIGNAL_THRESHOLD = 10;     % Frames considered "short signal"
     config.filtering.schmitt.MAX_NOISE_RATIO = 0.6;           % Maximum noise-to-signal ratio
     
+    %% GPU Processing Parameters
+    config.gpu = struct();
+    config.gpu.ENABLED = true;
+    config.gpu.MIN_DATA_SIZE = 20000;                % Minimum elements to justify GPU usage
+    config.gpu.MEMORY_FRACTION = 0.9;               % Fraction of GPU memory to use
+    config.gpu.BATCH_SIZE = 100000;                 % Batch size for chunked processing
+    config.gpu.CHUNK_OVERLAP = 0.1;                 % Overlap between chunks
+    config.gpu.WARMUP_ITERATIONS = 2;               % GPU warmup iterations
+    
     %% Processing Parameters
     config.processing = struct();
     config.processing.USE_SINGLE_PRECISION = true;
-    config.processing.GPU_MIN_DATA_SIZE = 20000;
-    config.processing.GPU_MEMORY_FRACTION = 0.9;
-    config.processing.GPU_BATCH_SIZE = 100000;
-    config.processing.GPU_CHUNK_OVERLAP = 0.1;
-    config.processing.GPU_WARMUP_ITERATIONS = 2;
     config.processing.PARALLEL_MIN_GROUPS = 1;
     config.processing.PARALLEL_MIN_FILES = 2;
     config.processing.MAX_PARALLEL_WORKERS = 6;
@@ -72,19 +69,11 @@ function config = GluSnFRConfig()
     config.processing.PREALLOCATE_RESULTS = true;
     config.processing.GARBAGE_COLLECT_FREQUENCY = 5;
     
-    %% File I/O Optimization Parameters
-    config.io = struct();
-    config.io.USE_PARALLEL_FILE_READING = true;
-    config.io.FILE_READ_BUFFER_SIZE = 8192;
-    config.io.EXCEL_READ_METHOD = 'auto';
-    config.io.CACHE_PARSED_FILES = false;
-    config.io.VALIDATE_FILES_PARALLEL = true;
-
     %% File I/O Parameters
     config.io = struct();
     config.io.USE_PARALLEL_FILE_READING = true;
     config.io.FILE_READ_BUFFER_SIZE = 8192;
-    config.io.EXCEL_READ_METHOD = 'readcell';  % Use best method only
+    config.io.EXCEL_READ_METHOD = 'readcell';
     config.io.CACHE_PARSED_FILES = false;
     config.io.VALIDATE_FILES_PARALLEL = true;
     
@@ -130,7 +119,6 @@ function config = GluSnFRConfig()
     config.plotting.ENABLE_PLOT_CACHING = true;           % Cache layouts, colors, etc.
     config.plotting.EARLY_EXIT_ON_NO_DATA = true;         % Skip plot creation if no data
     
-    
     %% File Patterns (cached regex patterns)
     config.patterns = struct();
     config.patterns.PPF_TIMEPOINT = 'PPF-(\d+)ms';
@@ -145,21 +133,6 @@ function config = GluSnFRConfig()
     config.validation.MAX_ROI_NUMBER = 1200;
     config.validation.MIN_BASELINE_FRAMES = 100;
     
-    %% Performance Monitoring
-    config.performance = struct();
-    config.performance.ENABLE_TIMING = true;
-    config.performance.ENABLE_MEMORY_MONITORING = true;
-    config.performance.ENABLE_GPU_MONITORING = true;
-    config.performance.LOG_PERFORMANCE_STATS = true;
-    config.performance.BENCHMARK_MODE = false;
-    
-    %% Adaptive Settings
-    config.adaptive = struct();
-    config.adaptive.ENABLE_ADAPTIVE_GPU_THRESHOLD = true;
-    config.adaptive.ENABLE_ADAPTIVE_PARALLEL_WORKERS = true;
-    config.adaptive.ENABLE_ADAPTIVE_BATCH_SIZE = true;
-    config.adaptive.LEARNING_RATE = 0.1;
-    
     %% Debug and Logging
     config.debug = struct();
     config.debug.VERBOSE_FILTERING = false;
@@ -168,122 +141,4 @@ function config = GluSnFRConfig()
     config.debug.ENABLE_PROFILING = false;
     config.debug.LOG_LEVEL = 'INFO';                      % 'DEBUG', 'INFO', 'WARNING', 'ERROR'
     config.debug.ENABLE_PLOT_DEBUG = true;               % Debug mode for plotting
-end
-
-function performanceConfig = getOptimalPerformanceSettings()
-    % Get performance-optimized settings based on system capabilities
-    
-    performanceConfig = struct();
-    
-    % Detect system capabilities
-    numCores = feature('numcores');
-    hasParallelToolbox = license('test', 'Distrib_Computing_Toolbox');
-    hasGPU = gpuDeviceCount > 0;
-    
-    if hasGPU
-        gpu = gpuDevice();
-        gpuMemoryGB = gpu.AvailableMemory / 1e9;
-    else
-        gpuMemoryGB = 0;
-    end
-    
-    % System memory
-    try
-        [~, sys] = memory;
-        systemMemoryGB = sys.PhysicalMemory.Total / 1e9;
-    catch
-        systemMemoryGB = 8; % Conservative estimate
-    end
-    
-    % Optimize based on system
-    if hasGPU && gpuMemoryGB >= 4
-        performanceConfig.gpu_strategy = 'aggressive';
-        performanceConfig.gpu_min_data_size = 10000;
-        performanceConfig.gpu_memory_fraction = 0.95;
-    elseif hasGPU && gpuMemoryGB >= 2
-        performanceConfig.gpu_strategy = 'moderate';
-        performanceConfig.gpu_min_data_size = 25000;
-        performanceConfig.gpu_memory_fraction = 0.85;
-    else
-        performanceConfig.gpu_strategy = 'conservative';
-        performanceConfig.gpu_min_data_size = 50000;
-        performanceConfig.gpu_memory_fraction = 0.7;
-    end
-    
-    % Parallel processing optimization
-    if hasParallelToolbox && numCores >= 8
-        performanceConfig.parallel_strategy = 'aggressive';
-        performanceConfig.max_workers = min(8, numCores - 1);
-        performanceConfig.parallel_file_threshold = 1;
-    elseif hasParallelToolbox && numCores >= 4
-        performanceConfig.parallel_strategy = 'moderate';
-        performanceConfig.max_workers = min(4, numCores - 1);
-        performanceConfig.parallel_file_threshold = 2;
-    else
-        performanceConfig.parallel_strategy = 'minimal';
-        performanceConfig.max_workers = 2;
-        performanceConfig.parallel_file_threshold = 4;
-    end
-    
-    % Memory optimization
-    if systemMemoryGB >= 32
-        performanceConfig.memory_strategy = 'high_performance';
-        performanceConfig.preallocation_factor = 1.5;
-        performanceConfig.enable_caching = true;
-    elseif systemMemoryGB >= 16
-        performanceConfig.memory_strategy = 'balanced';
-        performanceConfig.preallocation_factor = 1.2;
-        performanceConfig.enable_caching = false;
-    else
-        performanceConfig.memory_strategy = 'conservative';
-        performanceConfig.preallocation_factor = 1.0;
-        performanceConfig.enable_caching = false;
-    end
-    
-    % I/O optimization
-    performanceConfig.io_buffer_size = min(16384, systemMemoryGB * 1024); % Scale with memory
-    performanceConfig.parallel_io_threshold = performanceConfig.parallel_file_threshold;
-    
-    fprintf('Performance configuration optimized for:\n');
-    fprintf('  GPU: %s (%.1f GB)\n', performanceConfig.gpu_strategy, gpuMemoryGB);
-    fprintf('  Parallel: %s (%d workers)\n', performanceConfig.parallel_strategy, performanceConfig.max_workers);
-    fprintf('  Memory: %s (%.1f GB)\n', performanceConfig.memory_strategy, systemMemoryGB);
-end
-
-function adaptiveConfig = createAdaptiveConfiguration(baseConfig, performanceHistory)
-    % Create adaptive configuration based on performance history
-    
-    adaptiveConfig = baseConfig;
-    
-    if nargin < 2 || isempty(performanceHistory)
-        return;
-    end
-    
-    % Analyze performance trends
-    if isfield(performanceHistory, 'gpu_speedup')
-        avgSpeedup = mean(performanceHistory.gpu_speedup);
-        
-        if avgSpeedup < 1.5  % GPU not providing significant speedup
-            adaptiveConfig.processing.GPU_MIN_DATA_SIZE = ...
-                adaptiveConfig.processing.GPU_MIN_DATA_SIZE * 1.5;
-        elseif avgSpeedup > 3.0  % GPU very effective
-            adaptiveConfig.processing.GPU_MIN_DATA_SIZE = ...
-                max(10000, adaptiveConfig.processing.GPU_MIN_DATA_SIZE * 0.8);
-        end
-    end
-    
-    % Adaptive parallel processing
-    if isfield(performanceHistory, 'parallel_efficiency')
-        avgEfficiency = mean(performanceHistory.parallel_efficiency);
-        
-        if avgEfficiency < 0.6  % Poor parallel efficiency
-            adaptiveConfig.processing.PARALLEL_MIN_FILES = ...
-                adaptiveConfig.processing.PARALLEL_MIN_FILES + 1;
-        elseif avgEfficiency > 0.8  % Good parallel efficiency
-            adaptiveConfig.processing.PARALLEL_MIN_FILES = ...
-                max(1, adaptiveConfig.processing.PARALLEL_MIN_FILES - 1);
-        end
-    end
-    
-    fprintf('Configuration adapted based on performance history\n');
 end

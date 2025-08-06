@@ -1,7 +1,7 @@
 function modules = module_loader()
     % MODULE_LOADER - Central module loading system
     % 
-    % Loads all pipeline modules in the correct order to avoid circular dependencies
+    % UPDATED: Fixed validation tests for new function signatures after refactoring
     
     fprintf('Loading GluSnFR Analysis Pipeline modules...\n');
     
@@ -13,13 +13,13 @@ function modules = module_loader()
         % Step 2: Load utility modules (pass config to avoid circular dependencies)
         fprintf('  Loading utilities...\n');
         modules.utils = string_utils(modules.config);  % Pass config to avoid circular dependency
-        modules.cache = roi_cache();
         modules.memory = memory_manager();
         
         % Step 3: Load core processing modules
         fprintf('  Loading processing modules...\n');
         modules.calc = df_calculator();
         modules.filter = roi_filter(); 
+        modules.gpu = gpu_processor();  % NEW: Add GPU processor
         
         % Step 4: Load I/O modules
         fprintf('  Loading I/O modules...\n');
@@ -45,10 +45,10 @@ function modules = module_loader()
 end
 
 function validateAllModules(modules)
-    % Validate that all required modules are loaded
+    % UPDATED: Validate modules with new function signatures
     
     requiredModules = {'config', 'calc', 'filter', 'memory', 'utils', ...
-                      'io', 'organize', 'plot', 'analysis', 'controller'};
+                      'io', 'organize', 'plot', 'analysis', 'controller', 'gpu'};
     
     % Check all modules exist
     for i = 1:length(requiredModules)
@@ -58,59 +58,80 @@ function validateAllModules(modules)
         end
     end
     
-    % Test critical functions
-    testResults = runModuleTests(modules);
+    % Test critical functions with updated signatures
+    testResults = runModuleTestsUpdated(modules);
     
     if all(testResults)
         fprintf('✓ Module validation passed\n');
     else
-        error('Module validation failed: %d/%d tests failed', sum(~testResults), length(testResults));
+        failedTests = find(~testResults);
+        error('Module validation failed: %d/%d tests failed (tests %s)', ...
+              sum(~testResults), length(testResults), mat2str(failedTests));
     end
 end
 
-function testResults = runModuleTests(modules)
-    % Run quick functionality tests for each module
+function testResults = runModuleTestsUpdated(modules)
+    % UPDATED: Run tests with correct function signatures after refactoring
     
-    testResults = false(7, 1);
+    testResults = false(8, 1);  % Updated to 8 tests (added GPU test)
     
     try
         % Test 1: Configuration
         assert(isfield(modules.config, 'version'), 'Config missing version');
+        % UPDATED: Test new threshold parameters
+        assert(isfield(modules.config.thresholds, 'LOW_NOISE_SIGMA'), 'Missing LOW_NOISE_SIGMA');
+        assert(isfield(modules.config.thresholds, 'HIGH_NOISE_SIGMA'), 'Missing HIGH_NOISE_SIGMA');
+        assert(isfield(modules.config.thresholds, 'SD_NOISE_CUTOFF'), 'Missing SD_NOISE_CUTOFF');
         testResults(1) = true;
         
-        % Test 2: String utilities (with config)
-        testKey = modules.utils.extractGroupKey('CP_Ms_DIV13_Doc2b-WT1_Cs1-c1_1AP-1_bg_mean.xlsx');
-        assert(~isempty(testKey), 'String extraction failed');
+        % Test 2: String utilities (FIXED: No extra parameters needed)
+        testFilename = 'CP_Ms_DIV13_Doc2b-WT1_Cs1-c1_1AP-1_bg_mean.xlsx';
+        groupKey = modules.utils.extractGroupKey(testFilename);  % Config already bound in closure
+        assert(~isempty(groupKey), 'Group key extraction failed');
         testResults(2) = true;
         
-        % Test 3: Memory manager
+        % Test 3: Memory manager (unchanged)
         memUsage = modules.memory.estimateMemoryUsage(100, 600, 5, 'single');
         assert(memUsage > 0, 'Memory estimation failed');
         testResults(3) = true;
         
-        % Test 4: dF/F calculator decision logic
-        useGPU = modules.calc.shouldUseGPU(50000, false, struct('memory', 4), modules.config);
+        % Test 4: dF/F calculator (UPDATED: New signature)
+        hasGPU = false;  % For testing
+        gpuInfo = struct('memory', 4, 'name', 'Test');
+        useGPU = modules.calc.shouldUseGPU(50000, hasGPU, gpuInfo);  % Updated signature
         testResults(4) = true;  % Function exists and runs
         
-        % Test 5: ROI filter (Schmitt trigger only)
+        % Test 5: ROI filter (UPDATED: Check new functions)
         assert(isfield(modules.filter, 'filterROIs'), 'Filter missing main function');
         assert(isfield(modules.filter, 'applySchmittTrigger'), 'Filter missing Schmitt trigger function');
         assert(isfield(modules.filter, 'calculateSchmittThresholds'), 'Filter missing threshold calculation');
         testResults(5) = true;
         
-        % Test 6: I/O operations
+        % Test 6: I/O operations (unchanged)
         assert(isfield(modules.io, 'reader'), 'IO missing reader module');
         assert(isfield(modules.io, 'writer'), 'IO missing writer module');
         assert(isfield(modules.io.reader, 'readFile'), 'Reader missing readFile function');
         assert(isfield(modules.io.writer, 'writeResults'), 'Writer missing writeResults function');
         testResults(6) = true;
 
-        % Test 7: Plot controller
+        % Test 7: Plot controller (unchanged)
         assert(isfield(modules.plot, 'generateGroupPlots'), 'Plot controller missing main function');
         assert(isfield(modules.plot, 'shouldUseParallel'), 'Plot controller missing parallel function');
         testResults(7) = true;
         
+        % Test 8: GPU processor (NEW)
+        assert(isfield(modules.gpu, 'calculate'), 'GPU processor missing calculate function');
+        assert(isfield(modules.gpu, 'shouldUseGPU'), 'GPU processor missing shouldUseGPU function');
+        assert(isfield(modules.gpu, 'getCapabilities'), 'GPU processor missing getCapabilities function');
+        testResults(8) = true;
+        
     catch ME
-        fprintf('Module test failed: %s', ME.message);
+        fprintf('Module test failed: %s\n', ME.message);
+        % Find which test failed based on current test results
+        failedTestNum = find(~testResults, 1);
+        if isempty(failedTestNum)
+            failedTestNum = length(testResults);
+        end
+        fprintf('Failed on test %d\n', failedTestNum);
     end
 end

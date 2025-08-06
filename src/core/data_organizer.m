@@ -80,7 +80,7 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData(groupData, g
 end
 
 function filteringStats = collectFilteringStats(groupData)
-    % FIXED: Collect filtering statistics with proper Schmitt data storage
+    % UPDATED: Collect filtering statistics with standard deviations instead of basic thresholds
     % Ensures all required filtering data is available for ROI cache creation
     
     filteringStats = struct();
@@ -94,7 +94,7 @@ function filteringStats = collectFilteringStats(groupData)
     allNoiseMap = containers.Map('KeyType', 'int32', 'ValueType', 'char');
     allUpperThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
     allLowerThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
-    allBasicThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
+    allStandardDeviations = containers.Map('KeyType', 'int32', 'ValueType', 'double');  % CHANGED: from basic thresholds
     
     foundSchmittData = false;
     
@@ -106,13 +106,15 @@ function filteringStats = collectFilteringStats(groupData)
             if isfield(stats, 'schmitt_info') && isstruct(stats.schmitt_info)
                 schmittInfo = stats.schmitt_info;
                 
-                % Verify all required Schmitt fields are present
+                % UPDATED: Verify all required Schmitt fields are present (with standard_deviations)
                 if isfield(schmittInfo, 'noise_classification') && ...
                    isfield(schmittInfo, 'upper_thresholds') && ...
                    isfield(schmittInfo, 'lower_thresholds') && ...
+                   isfield(schmittInfo, 'standard_deviations') && ...  % CHANGED: from basic_thresholds
                    ~isempty(schmittInfo.noise_classification) && ...
                    ~isempty(schmittInfo.upper_thresholds) && ...
-                   ~isempty(schmittInfo.lower_thresholds)
+                   ~isempty(schmittInfo.lower_thresholds) && ...
+                   ~isempty(schmittInfo.standard_deviations)      % CHANGED: from basic_thresholds
                     
                     foundSchmittData = true;
                     
@@ -125,14 +127,9 @@ function filteringStats = collectFilteringStats(groupData)
                         noiseClassification = schmittInfo.noise_classification;
                         upperThresholds = schmittInfo.upper_thresholds;
                         lowerThresholds = schmittInfo.lower_thresholds;
+                        standardDeviations = schmittInfo.standard_deviations;  % CHANGED: from basic_thresholds
                         
-                        % Get basic thresholds
-                        basicThresholds = [];
-                        if isfield(groupData{i}, 'thresholds')
-                            basicThresholds = groupData{i}.thresholds;
-                        end
-                        
-                        % FIXED: Store data using ROI numbers as keys (handle all array types)
+                        % UPDATED: Store data using ROI numbers as keys (handle all array types)
                         numROIsToProcess = length(roiNumbers);
                         
                         for j = 1:numROIsToProcess
@@ -172,11 +169,15 @@ function filteringStats = collectFilteringStats(groupData)
                                 end
                             end
                             
-                            % Store basic threshold
-                            if ~isempty(basicThresholds) && j <= length(basicThresholds)
-                                basicThresh = basicThresholds(j);
-                                if isnumeric(basicThresh) && isfinite(basicThresh)
-                                    allBasicThresholds(roiNum) = double(basicThresh);
+                            % CHANGED: Store standard deviation instead of basic threshold
+                            if j <= length(standardDeviations)
+                                if iscell(standardDeviations)
+                                    stdDev = standardDeviations{j};
+                                else
+                                    stdDev = standardDeviations(j);
+                                end
+                                if isnumeric(stdDev) && isfinite(stdDev)
+                                    allStandardDeviations(roiNum) = double(stdDev);
                                 end
                             end
                         end
@@ -211,21 +212,21 @@ function filteringStats = collectFilteringStats(groupData)
         end
     end
     
-    % FIXED: Package the collected data if Schmitt data was found
+    % UPDATED: Package the collected data if Schmitt data was found
     if foundSchmittData && ~isempty(allNoiseMap)
         filteringStats.available = true;
         filteringStats.method = 'schmitt_trigger';
         filteringStats.roiNoiseMap = allNoiseMap;
         filteringStats.roiUpperThresholds = allUpperThresholds;
         filteringStats.roiLowerThresholds = allLowerThresholds;
-        filteringStats.roiBasicThresholds = allBasicThresholds;
+        filteringStats.roiStandardDeviations = allStandardDeviations;  % CHANGED: from roiBasicThresholds
         
         if cfg.debug.ENABLE_PLOT_DEBUG
             fprintf('    Successfully collected Schmitt filtering statistics:\n');
             fprintf('      ROIs with noise classification: %d\n', length(allNoiseMap));
             fprintf('      ROIs with upper thresholds: %d\n', length(allUpperThresholds));
             fprintf('      ROIs with lower thresholds: %d\n', length(allLowerThresholds));
-            fprintf('      ROIs with basic thresholds: %d\n', length(allBasicThresholds));
+            fprintf('      ROIs with standard deviations: %d\n', length(allStandardDeviations));  % CHANGED: from basic thresholds
         end
     else
         if cfg.debug.ENABLE_PLOT_DEBUG
@@ -246,6 +247,7 @@ function filteringStats = collectFilteringStats(groupData)
         end
     end
 end
+
 function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData, groupMetadata, groupKey, cfg)
     % UPDATED: PPF-specific data organization with minimal output
     
@@ -448,7 +450,7 @@ end
 
 
 function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData, groupMetadata, cfg)
-    % UPDATED: 1AP-specific data organization with minimal output
+    % UPDATED: 1AP-specific data organization - FIXED legacy parameter references
     
     % Extract trial numbers
     [originalTrialNumbers, trialMapping] = createTrialMapping(groupMetadata);
@@ -457,7 +459,7 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData
         error('No valid trial numbers found in metadata');
     end
     
-    % SIMPLIFIED: Collect ROI information without complex noise mapping
+    % UPDATED: Collect ROI information without legacy parameter references
     utils = string_utils(cfg);
     allROIData = [];
     
@@ -478,9 +480,17 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData
         fileROIData = struct();
         fileROIData.roiNumbers = roiNums;
         fileROIData.dF_values = fileData.dF_values;
-        fileROIData.thresholds = fileData.thresholds;
+        fileROIData.thresholds = fileData.thresholds;  % These are now upper thresholds
         fileROIData.roiNames = fileData.roiNames;
         fileROIData.fileIndex = fileIdx;
+        
+        % CRITICAL: Store original standard deviations if available
+        if isfield(fileData, 'originalStandardDeviations')
+            fileROIData.standardDeviations = fileData.originalStandardDeviations;
+        elseif isfield(fileData, 'filterStats') && isfield(fileData.filterStats, 'schmitt_info') && ...
+               isfield(fileData.filterStats.schmitt_info, 'standard_deviations')
+            fileROIData.standardDeviations = fileData.filterStats.schmitt_info.standard_deviations;
+        end
         
         allROIData = [allROIData; fileROIData];
     end
@@ -498,7 +508,7 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData
     uniqueROIs = unique(allUniqueROIs);
     uniqueROIs = sort(uniqueROIs);
     
-    % Create noise classification map (SIMPLIFIED)
+    % FIXED: Create noise classification map using standard deviations instead of LOW_NOISE_CUTOFF
     roiNoiseMap = containers.Map('KeyType', 'double', 'ValueType', 'char');
     
     for roiNum = uniqueROIs'
@@ -510,10 +520,11 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData
             fileData = allROIData(fileIdx);
             roiPos = find(fileData.roiNumbers == roiNum, 1);
             
-            if ~isempty(roiPos) && roiPos <= length(fileData.thresholds)
-                threshold = fileData.thresholds(roiPos);
-                if isfinite(threshold)
-                    if threshold <= cfg.thresholds.LOW_NOISE_CUTOFF
+            if ~isempty(roiPos) && roiPos <= length(fileData.standardDeviations)
+                standardDeviation = fileData.standardDeviations(roiPos);
+                if isfinite(standardDeviation)
+                    % FIXED: Use SD_NOISE_CUTOFF instead of LOW_NOISE_CUTOFF
+                    if standardDeviation <= cfg.thresholds.SD_NOISE_CUTOFF
                         lowNoiseCount = lowNoiseCount + 1;
                     else
                         highNoiseCount = highNoiseCount + 1;
@@ -530,7 +541,7 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData
         end
     end
     
-    % Organize data into table format
+    % Organize data into table format (rest unchanged)
     timeData_ms = groupData{1}.timeData_ms;
     numTrials = length(originalTrialNumbers);
     
@@ -598,6 +609,7 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData
     % MINIMAL OUTPUT: No detailed organization logging
     % (will be shown in group processing summary)
 end
+
 
 function [originalTrialNumbers, trialMapping] = createTrialMapping(groupMetadata)
     % Create mapping between original and sequential trial numbers
@@ -718,7 +730,7 @@ function roiAveragedData = createROIAveragedData1AP(organizedData, roiInfo, time
 end
 
 function totalAveragedData = createTotalAveragedData1AP(organizedData, roiInfo, timeData_ms)
-    % Create total averaged data by noise level for 1AP experiments
+    % FIXED: Create total averaged data by noise level - no legacy parameter references
     
     totalAveragedTable = table();
     totalAveragedTable.Frame = timeData_ms;
@@ -731,7 +743,7 @@ function totalAveragedData = createTotalAveragedData1AP(organizedData, roiInfo, 
         return;
     end
     
-    % Separate data by noise level
+    % Separate data by noise level using the roiNoiseMap (no threshold calculations needed)
     lowNoiseData = [];
     highNoiseData = [];
     allValidData = [];
@@ -762,6 +774,7 @@ function totalAveragedData = createTotalAveragedData1AP(organizedData, roiInfo, 
                     allValidData = [allValidData, colData];
                 end
                 
+                % FIXED: Use pre-computed noise level from roiNoiseMap
                 if strcmp(noiseLevel, 'low')
                     lowNoiseCount = lowNoiseCount + 1;
                     if isempty(lowNoiseData)
@@ -781,7 +794,7 @@ function totalAveragedData = createTotalAveragedData1AP(organizedData, roiInfo, 
         end
     end
     
-    % Calculate averages
+    % Calculate averages (unchanged)
     if ~isempty(lowNoiseData)
         lowNoiseAvg = mean(lowNoiseData, 2, 'omitnan');
         totalAveragedTable.(sprintf('Low_Noise_n%d', lowNoiseCount)) = lowNoiseAvg;

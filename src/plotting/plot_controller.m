@@ -131,15 +131,15 @@ function roiCache = create1APCacheFixed(roiInfo, organizedData, averagedData, ut
                    isa(roiInfo.filteringStats.roiUpperThresholds, 'containers.Map') && ...
                    isfield(roiInfo.filteringStats, 'roiLowerThresholds') && ...
                    isa(roiInfo.filteringStats.roiLowerThresholds, 'containers.Map') && ...
-                   isfield(roiInfo.filteringStats, 'roiBasicThresholds') && ...
-                   isa(roiInfo.filteringStats.roiBasicThresholds, 'containers.Map')
+                   isfield(roiInfo.filteringStats, 'roiStandardDeviations') && ...
+                   isa(roiInfo.filteringStats.roiStandardDeviations, 'containers.Map')
                     
                     % FIXED: Store the complete filtering statistics
                     roiCache.hasFilteringStats = true;
                     roiCache.noiseMap = roiInfo.filteringStats.roiNoiseMap;
                     roiCache.upperThresholds = roiInfo.filteringStats.roiUpperThresholds;
                     roiCache.lowerThresholds = roiInfo.filteringStats.roiLowerThresholds;
-                    roiCache.basicThresholds = roiInfo.filteringStats.roiBasicThresholds;
+                    roiCache.standardDeviations = roiInfo.filteringStats.roiStandardDeviations;
                     
                     if cfg.debug.ENABLE_PLOT_DEBUG
                         fprintf('    Cache: Using Schmitt filtering statistics (%d ROIs with complete data)\n', ...
@@ -226,14 +226,14 @@ function roiCache = createPPFCacheFixed(roiInfo, organizedData, averagedData, ut
                    isa(roiInfo.filteringStats.roiUpperThresholds, 'containers.Map') && ...
                    isfield(roiInfo.filteringStats, 'roiLowerThresholds') && ...
                    isa(roiInfo.filteringStats.roiLowerThresholds, 'containers.Map') && ...
-                   isfield(roiInfo.filteringStats, 'roiBasicThresholds') && ...
-                   isa(roiInfo.filteringStats.roiBasicThresholds, 'containers.Map')
+                   isfield(roiInfo.filteringStats, 'roiStandardDeviations') && ...
+                   isa(roiInfo.filteringStats.roiStandardDeviations, 'containers.Map')
                     
                     roiCache.hasFilteringStats = true;
                     roiCache.noiseMap = roiInfo.filteringStats.roiNoiseMap;
                     roiCache.upperThresholds = roiInfo.filteringStats.roiUpperThresholds;
                     roiCache.lowerThresholds = roiInfo.filteringStats.roiLowerThresholds;
-                    roiCache.basicThresholds = roiInfo.filteringStats.roiBasicThresholds;
+                    roiCache.standardDeviations = roiInfo.filteringStats.roiStandardDeviations;
                     
                     if cfg.debug.ENABLE_PLOT_DEBUG
                         fprintf('    PPF Cache: Using Schmitt filtering statistics (%d ROIs)\n', ...
@@ -284,7 +284,7 @@ function isValid = validateROICache(roiCache, roiInfo)
         
         % CRITICAL: If filtering statistics are claimed to be available, validate them completely
         if roiCache.hasFilteringStats
-            requiredMaps = {'noiseMap', 'upperThresholds', 'lowerThresholds', 'basicThresholds'};
+            requiredMaps = {'noiseMap', 'upperThresholds', 'lowerThresholds', 'standardDeviations'};
             for i = 1:length(requiredMaps)
                 mapName = requiredMaps{i};
                 if ~isfield(roiCache, mapName)
@@ -301,7 +301,7 @@ function isValid = validateROICache(roiCache, roiInfo)
             
             % Verify that filtering statistics contain data for at least some ROIs
             numROIsWithNoise = length(roiCache.noiseMap);
-            numROIsWithThresholds = length(roiCache.basicThresholds);
+            numROIsWithThresholds = length(roiCache.standardDeviations);
             
             if numROIsWithNoise == 0 || numROIsWithThresholds == 0
                 fprintf('    Cache validation failed: no ROIs have complete filtering data\n');

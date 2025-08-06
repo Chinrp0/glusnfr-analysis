@@ -185,22 +185,22 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
         hold on;
         
         % FIXED: Get cached threshold data - NO FALLBACK CALCULATIONS
-        [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = ...
+        [roiNoiseLevel, upperThreshold, lowerThreshold, standardDeviation] = ...
             getROIDataFromCache(roiNum, roiCache);
         
         % Determine display threshold (prefer upper threshold from Schmitt filtering)
         displayThreshold = NaN; % Default to invalid
         if isfinite(upperThreshold) && upperThreshold > 0
             displayThreshold = upperThreshold; % Use Schmitt upper threshold
-        elseif isfinite(basicThreshold) && basicThreshold > 0
-            displayThreshold = basicThreshold; % Fallback to basic threshold
+        elseif isfinite(standardDeviation) && standardDeviation > 0
+            displayThreshold = standardDeviation; % Fallback to basic threshold
         end
         
         % VALIDATION: Only proceed if we have valid threshold data
         if ~isfinite(displayThreshold)
             if config.debug.ENABLE_PLOT_DEBUG
                 fprintf('    WARNING: ROI %d has no valid threshold data (upper=%.4f, basic=%.4f)\n', ...
-                        roiNum, upperThreshold, basicThreshold);
+                        roiNum, upperThreshold, standardDeviation);
             end
             % Continue with plot but without threshold line
         end
@@ -478,7 +478,7 @@ function avgThreshold = calculateAverageThreshold(avgData, config)
         
         % Calculate threshold using config multiplier
         baselineSD = std(baselineData, 'omitnan');
-        avgThreshold = config.thresholds.SD_MULTIPLIER * baselineSD;
+        avgThreshold = config.thresholds.LOW_NOISE_SIGMA * baselineSD;
     else
         avgThreshold = NaN;
     end
@@ -595,7 +595,7 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
     end
 end
 
-function [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = getROIDataFromCache(roiNum, roiCache)
+function [roiNoiseLevel, upperThreshold, lowerThreshold, standardDeviation] = getROIDataFromCache(roiNum, roiCache)
     % FIXED: Cache-only ROI data retrieval - NO FALLBACK CALCULATIONS
     % This ensures data consistency between plots and metadata
     
@@ -603,7 +603,7 @@ function [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = getRO
     roiNoiseLevel = 'unknown';
     upperThreshold = NaN;
     lowerThreshold = NaN;
-    basicThreshold = NaN;
+    standardDeviation = NaN;
     
     % ONLY use cache data - NO CALCULATIONS OR FALLBACKS
     if roiCache.hasFilteringStats
@@ -630,10 +630,10 @@ function [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = getRO
             end
             
             % Retrieve basic threshold
-            if isfield(roiCache, 'basicThresholds') && ...
-               isa(roiCache.basicThresholds, 'containers.Map') && ...
-               isKey(roiCache.basicThresholds, roiNum)
-                basicThreshold = roiCache.basicThresholds(roiNum);
+            if isfield(roiCache, 'standardDeviations') && ...
+               isa(roiCache.standardDeviations, 'containers.Map') && ...
+               isKey(roiCache.standardDeviations, roiNum)
+                standardDeviation = roiCache.standardDeviations(roiNum);
             end
             
         catch ME
