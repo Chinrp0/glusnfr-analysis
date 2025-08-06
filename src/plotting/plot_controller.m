@@ -60,17 +60,13 @@ function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outp
 end
 
 function roiCache = createROICacheFixed(roiInfo, organizedData, averagedData)
-    % FIXED: Create ROI cache with proper data validation and mapping
+    % FIXED: Create ROI cache with proper filtering statistics and NO fallbacks
     
     roiCache = struct();
     roiCache.valid = false;
     roiCache.experimentType = roiInfo.experimentType;
-    
-    % Initialize empty containers
     roiCache.hasFilteringStats = false;
     roiCache.numbers = [];
-    roiCache.nameToIndex = containers.Map();
-    roiCache.numberToIndex = containers.Map('KeyType', 'int32', 'ValueType', 'int32');
     
     try
         cfg = GluSnFRConfig();
@@ -78,9 +74,9 @@ function roiCache = createROICacheFixed(roiInfo, organizedData, averagedData)
         
         % FIXED: Handle different experiment types properly
         if strcmp(roiInfo.experimentType, '1AP')
-            roiCache = create1APCache(roiInfo, organizedData, averagedData, utils, cfg);
+            roiCache = create1APCacheFixed(roiInfo, organizedData, averagedData, utils, cfg);
         elseif strcmp(roiInfo.experimentType, 'PPF')
-            roiCache = createPPFCache(roiInfo, organizedData, averagedData, utils, cfg);
+            roiCache = createPPFCacheFixed(roiInfo, organizedData, averagedData, utils, cfg);
         end
         
     catch ME
@@ -91,15 +87,15 @@ function roiCache = createROICacheFixed(roiInfo, organizedData, averagedData)
     end
 end
 
-function roiCache = create1APCache(roiInfo, organizedData, averagedData, utils, cfg)
-    % Create cache for 1AP experiments with proper ROI mapping
+function roiCache = create1APCacheFixed(roiInfo, organizedData, averagedData, utils, cfg)
+    % FIXED: Create cache for 1AP experiments with complete filtering statistics
     
     roiCache = struct();
     roiCache.experimentType = '1AP';
     roiCache.valid = false;
     roiCache.hasFilteringStats = false;
     
-    % Extract ROI numbers from organized data (filtered ROIs only)
+    % Extract ROI numbers from organized data (these are the FILTERED ROIs only)
     if istable(organizedData) && width(organizedData) > 1
         varNames = organizedData.Properties.VariableNames(2:end); % Skip Frame column
         roiNumbers = [];
@@ -121,25 +117,62 @@ function roiCache = create1APCache(roiInfo, organizedData, averagedData, utils, 
                 roiCache.numberToIndex(roiCache.numbers(i)) = i;
             end
             
-            % FIXED: Extract filtering statistics from roiInfo
-            if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
-                roiCache.hasFilteringStats = true;
-                roiCache.noiseMap = roiInfo.filteringStats.roiNoiseMap;
-                roiCache.upperThresholds = roiInfo.filteringStats.roiUpperThresholds;
-                roiCache.lowerThresholds = roiInfo.filteringStats.roiLowerThresholds;
-                roiCache.basicThresholds = roiInfo.filteringStats.roiBasicThresholds;
+            % CRITICAL: Extract filtering statistics from roiInfo (from pipeline processing)
+            if isfield(roiInfo, 'filteringStats') && ...
+               isstruct(roiInfo.filteringStats) && ...
+               isfield(roiInfo.filteringStats, 'available') && ...
+               roiInfo.filteringStats.available && ...
+               strcmp(roiInfo.filteringStats.method, 'schmitt_trigger')
+                
+                % REQUIRED: All filtering statistics must be present and properly populated
+                if isfield(roiInfo.filteringStats, 'roiNoiseMap') && ...
+                   isa(roiInfo.filteringStats.roiNoiseMap, 'containers.Map') && ...
+                   isfield(roiInfo.filteringStats, 'roiUpperThresholds') && ...
+                   isa(roiInfo.filteringStats.roiUpperThresholds, 'containers.Map') && ...
+                   isfield(roiInfo.filteringStats, 'roiLowerThresholds') && ...
+                   isa(roiInfo.filteringStats.roiLowerThresholds, 'containers.Map') && ...
+                   isfield(roiInfo.filteringStats, 'roiBasicThresholds') && ...
+                   isa(roiInfo.filteringStats.roiBasicThresholds, 'containers.Map')
+                    
+                    % FIXED: Store the complete filtering statistics
+                    roiCache.hasFilteringStats = true;
+                    roiCache.noiseMap = roiInfo.filteringStats.roiNoiseMap;
+                    roiCache.upperThresholds = roiInfo.filteringStats.roiUpperThresholds;
+                    roiCache.lowerThresholds = roiInfo.filteringStats.roiLowerThresholds;
+                    roiCache.basicThresholds = roiInfo.filteringStats.roiBasicThresholds;
+                    
+                    if cfg.debug.ENABLE_PLOT_DEBUG
+                        fprintf('    Cache: Using Schmitt filtering statistics (%d ROIs with complete data)\n', ...
+                                length(roiCache.noiseMap));
+                    end
+                else
+                    if cfg.debug.ENABLE_PLOT_DEBUG
+                        fprintf('    Cache: Incomplete Schmitt statistics - missing required maps\n');
+                    end
+                end
             else
-                % FALLBACK: Create from basic threshold data if available
-                roiCache = createBasicThresholdCache(roiCache, roiInfo, cfg);
+                if cfg.debug.ENABLE_PLOT_DEBUG
+                    fprintf('    Cache: No Schmitt filtering statistics available\n');
+                    if isfield(roiInfo, 'filteringStats')
+                        if isfield(roiInfo.filteringStats, 'method')
+                            fprintf('           Filtering method used: %s\n', roiInfo.filteringStats.method);
+                        end
+                        fprintf('           Available: %s\n', ...
+                                string(roiInfo.filteringStats.available));
+                    end
+                end
             end
+            
+            % REMOVED: No fallback calculations - if filtering stats aren't available, 
+            % that means the pipeline didn't generate them properly
             
             roiCache.valid = true;
         end
     end
 end
 
-function roiCache = createPPFCache(roiInfo, organizedData, averagedData, utils, cfg)
-    % Create cache for PPF experiments
+function roiCache = createPPFCacheFixed(roiInfo, organizedData, averagedData, utils, cfg)
+    % FIXED: Create cache for PPF experiments with complete filtering statistics
     
     roiCache = struct();
     roiCache.experimentType = 'PPF';
@@ -149,11 +182,11 @@ function roiCache = createPPFCache(roiInfo, organizedData, averagedData, utils, 
     % Extract ROI numbers from PPF organized data
     if isstruct(organizedData)
         % Get primary data table
-        if isfield(organizedData, 'allData') && width(organizedData.allData) > 1
+        if isfield(organizedData, 'allData') && istable(organizedData.allData) && width(organizedData.allData) > 1
             dataTable = organizedData.allData;
-        elseif isfield(organizedData, 'bothPeaks') && width(organizedData.bothPeaks) > 1
+        elseif isfield(organizedData, 'bothPeaks') && istable(organizedData.bothPeaks) && width(organizedData.bothPeaks) > 1
             dataTable = organizedData.bothPeaks;
-        elseif isfield(organizedData, 'singlePeak') && width(organizedData.singlePeak) > 1
+        elseif isfield(organizedData, 'singlePeak') && istable(organizedData.singlePeak) && width(organizedData.singlePeak) > 1
             dataTable = organizedData.singlePeak;
         else
             return; % No valid data
@@ -179,155 +212,121 @@ function roiCache = createPPFCache(roiInfo, organizedData, averagedData, utils, 
                 roiCache.numberToIndex(roiCache.numbers(i)) = i;
             end
             
-            % Extract filtering statistics
-            if isfield(roiInfo, 'filteringStats') && roiInfo.filteringStats.available
-                roiCache.hasFilteringStats = true;
-                roiCache.noiseMap = roiInfo.filteringStats.roiNoiseMap;
-                roiCache.upperThresholds = roiInfo.filteringStats.roiUpperThresholds;
-                roiCache.lowerThresholds = roiInfo.filteringStats.roiLowerThresholds;
-                roiCache.basicThresholds = roiInfo.filteringStats.roiBasicThresholds;
-            else
-                % Create from coverslip files data
-                roiCache = createPPFThresholdCache(roiCache, roiInfo, cfg);
+            % CRITICAL: Extract filtering statistics (same logic as 1AP)
+            if isfield(roiInfo, 'filteringStats') && ...
+               isstruct(roiInfo.filteringStats) && ...
+               isfield(roiInfo.filteringStats, 'available') && ...
+               roiInfo.filteringStats.available && ...
+               strcmp(roiInfo.filteringStats.method, 'schmitt_trigger')
+                
+                % REQUIRED: All filtering statistics must be present
+                if isfield(roiInfo.filteringStats, 'roiNoiseMap') && ...
+                   isa(roiInfo.filteringStats.roiNoiseMap, 'containers.Map') && ...
+                   isfield(roiInfo.filteringStats, 'roiUpperThresholds') && ...
+                   isa(roiInfo.filteringStats.roiUpperThresholds, 'containers.Map') && ...
+                   isfield(roiInfo.filteringStats, 'roiLowerThresholds') && ...
+                   isa(roiInfo.filteringStats.roiLowerThresholds, 'containers.Map') && ...
+                   isfield(roiInfo.filteringStats, 'roiBasicThresholds') && ...
+                   isa(roiInfo.filteringStats.roiBasicThresholds, 'containers.Map')
+                    
+                    roiCache.hasFilteringStats = true;
+                    roiCache.noiseMap = roiInfo.filteringStats.roiNoiseMap;
+                    roiCache.upperThresholds = roiInfo.filteringStats.roiUpperThresholds;
+                    roiCache.lowerThresholds = roiInfo.filteringStats.roiLowerThresholds;
+                    roiCache.basicThresholds = roiInfo.filteringStats.roiBasicThresholds;
+                    
+                    if cfg.debug.ENABLE_PLOT_DEBUG
+                        fprintf('    PPF Cache: Using Schmitt filtering statistics (%d ROIs)\n', ...
+                                length(roiCache.noiseMap));
+                    end
+                end
             end
+            
+            % REMOVED: No fallback calculations for PPF either
             
             roiCache.valid = true;
         end
     end
 end
 
-function roiCache = createBasicThresholdCache(roiCache, roiInfo, cfg)
-    % Create threshold cache from basic threshold data
-    
-    roiCache.noiseMap = containers.Map('KeyType', 'int32', 'ValueType', 'char');
-    roiCache.upperThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
-    roiCache.lowerThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
-    roiCache.basicThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
-    
-    % Use threshold data if available
-    if isfield(roiInfo, 'thresholds') && ~isempty(roiInfo.thresholds)
-        [nROIs, nTrials] = size(roiInfo.thresholds);
-        
-        for roiIdx = 1:min(nROIs, length(roiCache.numbers))
-            roiNum = roiCache.numbers(roiIdx);
-            
-            % Get a representative threshold for this ROI
-            roiThresholds = roiInfo.thresholds(roiIdx, :);
-            validThresholds = roiThresholds(isfinite(roiThresholds) & roiThresholds > 0);
-            
-            if ~isempty(validThresholds)
-                basicThreshold = median(validThresholds);
-                
-                % Classify noise level
-                if basicThreshold <= cfg.thresholds.LOW_NOISE_CUTOFF
-                    noiseLevel = 'low';
-                    upperThreshold = basicThreshold * cfg.filtering.schmitt.LOW_NOISE_UPPER_MULT;
-                else
-                    noiseLevel = 'high';
-                    upperThreshold = basicThreshold * cfg.filtering.schmitt.HIGH_NOISE_UPPER_MULT;
-                end
-                lowerThreshold = basicThreshold * cfg.filtering.schmitt.LOWER_THRESHOLD_MULT;
-                
-                roiCache.noiseMap(roiNum) = noiseLevel;
-                roiCache.upperThresholds(roiNum) = upperThreshold;
-                roiCache.lowerThresholds(roiNum) = lowerThreshold;
-                roiCache.basicThresholds(roiNum) = basicThreshold;
-                roiCache.hasFilteringStats = true;
-            end
-        end
-    end
-end
-
-function roiCache = createPPFThresholdCache(roiCache, roiInfo, cfg)
-    % Create threshold cache from PPF coverslip files
-    
-    roiCache.noiseMap = containers.Map('KeyType', 'int32', 'ValueType', 'char');
-    roiCache.upperThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
-    roiCache.lowerThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
-    roiCache.basicThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
-    
-    if isfield(roiInfo, 'coverslipFiles') && ~isempty(roiInfo.coverslipFiles)
-        for fileIdx = 1:length(roiInfo.coverslipFiles)
-            fileData = roiInfo.coverslipFiles(fileIdx);
-            
-            if ~isempty(fileData.roiNumbers) && ~isempty(fileData.thresholds)
-                for roiIdx = 1:length(fileData.roiNumbers)
-                    roiNum = fileData.roiNumbers(roiIdx);
-                    
-                    if roiIdx <= length(fileData.thresholds)
-                        basicThreshold = fileData.thresholds(roiIdx);
-                        
-                        if isfinite(basicThreshold) && basicThreshold > 0
-                            % Classify noise level
-                            if basicThreshold <= cfg.thresholds.LOW_NOISE_CUTOFF
-                                noiseLevel = 'low';
-                                upperThreshold = basicThreshold * cfg.filtering.schmitt.LOW_NOISE_UPPER_MULT;
-                            else
-                                noiseLevel = 'high';
-                                upperThreshold = basicThreshold * cfg.filtering.schmitt.HIGH_NOISE_UPPER_MULT;
-                            end
-                            lowerThreshold = basicThreshold * cfg.filtering.schmitt.LOWER_THRESHOLD_MULT;
-                            
-                            roiCache.noiseMap(roiNum) = noiseLevel;
-                            roiCache.upperThresholds(roiNum) = upperThreshold;
-                            roiCache.lowerThresholds(roiNum) = lowerThreshold;
-                            roiCache.basicThresholds(roiNum) = basicThreshold;
-                            roiCache.hasFilteringStats = true;
-                        end
-                    end
-                end
-            end
-        end
-    end
-end
-
 function isValid = validateROICache(roiCache, roiInfo)
-    % Validate that ROI cache contains expected data
+    % ENHANCED: Validate that ROI cache contains all required data for plotting
     
     isValid = false;
     
     try
         % Basic structure validation
-        if ~isstruct(roiCache) || ~roiCache.valid
+        if ~isstruct(roiCache) || ~isfield(roiCache, 'valid') || ~roiCache.valid
             return;
         end
         
         % Check required fields
-        requiredFields = {'numbers', 'numberToIndex', 'experimentType'};
+        requiredFields = {'numbers', 'numberToIndex', 'experimentType', 'hasFilteringStats'};
         for i = 1:length(requiredFields)
             if ~isfield(roiCache, requiredFields{i})
+                fprintf('    Cache validation failed: missing field %s\n', requiredFields{i});
                 return;
             end
         end
         
         % Check that we have ROI numbers
-        if isempty(roiCache.numbers)
+        if isempty(roiCache.numbers) || ~isnumeric(roiCache.numbers)
+            fprintf('    Cache validation failed: no valid ROI numbers\n');
             return;
         end
         
         % Check that maps are properly sized
-        if length(roiCache.numberToIndex) ~= length(roiCache.numbers)
+        if ~isa(roiCache.numberToIndex, 'containers.Map') || ...
+           length(roiCache.numberToIndex) ~= length(roiCache.numbers)
+            fprintf('    Cache validation failed: numberToIndex map size mismatch\n');
             return;
         end
         
-        % Check filtering statistics if claimed to be available
+        % CRITICAL: If filtering statistics are claimed to be available, validate them completely
         if roiCache.hasFilteringStats
             requiredMaps = {'noiseMap', 'upperThresholds', 'lowerThresholds', 'basicThresholds'};
             for i = 1:length(requiredMaps)
-                if ~isfield(roiCache, requiredMaps{i}) || ~isa(roiCache.(requiredMaps{i}), 'containers.Map')
+                mapName = requiredMaps{i};
+                if ~isfield(roiCache, mapName)
+                    fprintf('    Cache validation failed: missing %s\n', mapName);
+                    return;
+                elseif ~isa(roiCache.(mapName), 'containers.Map')
+                    fprintf('    Cache validation failed: %s is not a containers.Map\n', mapName);
+                    return;
+                elseif isempty(roiCache.(mapName))
+                    fprintf('    Cache validation failed: %s is empty\n', mapName);
                     return;
                 end
             end
             
-            % Check that at least some ROIs have filtering data
-            if length(roiCache.noiseMap) == 0
+            % Verify that filtering statistics contain data for at least some ROIs
+            numROIsWithNoise = length(roiCache.noiseMap);
+            numROIsWithThresholds = length(roiCache.basicThresholds);
+            
+            if numROIsWithNoise == 0 || numROIsWithThresholds == 0
+                fprintf('    Cache validation failed: no ROIs have complete filtering data\n');
+                return;
+            end
+            
+            % QUALITY CHECK: Verify that the ROI numbers in the cache match the filtering data
+            roiKeysInNoise = cell2mat(keys(roiCache.noiseMap));
+            if isempty(roiKeysInNoise)
+                fprintf('    Cache validation failed: noise map has no numeric keys\n');
+                return;
+            end
+            
+            % Check that we have overlap between cache ROIs and filtering data
+            commonROIs = intersect(roiCache.numbers, roiKeysInNoise);
+            if isempty(commonROIs)
+                fprintf('    Cache validation failed: no ROIs overlap between cache and filtering data\n');
                 return;
             end
         end
         
         isValid = true;
         
-    catch
+    catch ME
+        fprintf('    Cache validation error: %s\n', ME.message);
         isValid = false;
     end
 end

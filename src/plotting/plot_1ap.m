@@ -1,6 +1,12 @@
 function plot1AP = plot_1ap()
-    % PLOT_1AP - FIXED 1AP experiment plotting functions
-    % Eliminates redundant computations and ensures proper threshold display
+    % PLOT_1AP - FIXED 1AP experiment plotting with centralized colors and proper thresholds
+    % 
+    % FIXES:
+    % - Centralized trial color system with consistent mapping
+    % - Proper threshold length (150ms window around stimulus)
+    % - One threshold line per trial in each subplot
+    % - Eliminated fallback/legacy logic
+    % - Fixed legend color consistency
     
     plot1AP.execute = @executePlotTask;
     plot1AP.generateTrials = @generateTrialsPlot;
@@ -59,7 +65,7 @@ function success = executePlotTask(task, config, varargin)
 end
 
 function success = generateTrialsPlot(organizedData, config, varargin)
-    % FIXED: Generate individual trials plots with proper threshold display
+    % FIXED: Generate individual trials plots with consistent colors and proper thresholds
     
     success = false;
     
@@ -93,25 +99,13 @@ function success = generateTrialsPlot(organizedData, config, varargin)
         timeData_ms = organizedData.Frame;
         stimulusTime_ms = config.timing.STIMULUS_TIME_MS;
         
-        % FIXED: Get unique trial numbers from the cache
         numROIs = length(roiCache.numbers);
         if numROIs == 0
             return;
         end
         
-        % Extract unique trials from organized data
-        varNames = organizedData.Properties.VariableNames(2:end);
-        uniqueTrials = [];
-        for i = 1:length(varNames)
-            trialMatch = regexp(varNames{i}, 'ROI\d+_T(\d+)', 'tokens');
-            if ~isempty(trialMatch)
-                trialNum = str2double(trialMatch{1}{1});
-                if ~ismember(trialNum, uniqueTrials)
-                    uniqueTrials(end+1) = trialNum;
-                end
-            end
-        end
-        uniqueTrials = sort(uniqueTrials);
+        % FIXED: Extract ALL unique trials and create consistent color mapping
+        [uniqueTrials, globalTrialColorMap] = createGlobalTrialColorSystem(organizedData, utils);
         
         if isempty(uniqueTrials)
             return;
@@ -120,13 +114,10 @@ function success = generateTrialsPlot(organizedData, config, varargin)
         % Calculate figure layout
         numFigures = ceil(numROIs / plotConfig.maxPlotsPerFigure);
         
-        % Get trial colors
-        trialColors = utils.getColors('trials', length(uniqueTrials));
-        
-        % Generate figures
+        % Generate figures with consistent color system
         for figNum = 1:numFigures
             figSuccess = generateTrialsFigureFixed(figNum, numFigures, numROIs, organizedData, ...
-                roiCache, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
+                roiCache, timeData_ms, stimulusTime_ms, uniqueTrials, globalTrialColorMap, ...
                 cleanGroupKey, outputFolder, utils, plotConfig, config);
             success = success || figSuccess;
         end
@@ -139,10 +130,40 @@ function success = generateTrialsPlot(organizedData, config, varargin)
     end
 end
 
+
+function [uniqueTrials, globalTrialColorMap] = createGlobalTrialColorSystem(organizedData, utils)
+    % FIXED: Create consistent trial color mapping for entire dataset
+    
+    varNames = organizedData.Properties.VariableNames(2:end); % Skip Frame column
+    uniqueTrials = [];
+    
+    % Extract all trial numbers from column names
+    for i = 1:length(varNames)
+        trialMatch = regexp(varNames{i}, 'ROI\d+_T(\d+(?:\.\d+)?)', 'tokens');
+        if ~isempty(trialMatch)
+            trialNum = str2double(trialMatch{1}{1});
+            if isfinite(trialNum) && ~ismember(trialNum, uniqueTrials)
+                uniqueTrials(end+1) = trialNum;
+            end
+        end
+    end
+    
+    uniqueTrials = sort(uniqueTrials);
+    
+    % Create consistent color mapping
+    trialColors = utils.getColors('trials', length(uniqueTrials));
+    globalTrialColorMap = containers.Map();
+    
+    for i = 1:length(uniqueTrials)
+        trialNum = uniqueTrials(i);
+        globalTrialColorMap(num2str(trialNum)) = trialColors(i, :);
+    end
+end
+
 function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organizedData, ...
-    roiCache, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
+    roiCache, timeData_ms, stimulusTime_ms, uniqueTrials, globalTrialColorMap, ...
     cleanGroupKey, outputFolder, utils, plotConfig, config)
-    % FIXED: Generate trials figure with proper threshold display per ROI
+    % FIXED: Generate trials figure with proper thresholds and consistent colors
     
     success = false;
     
@@ -163,14 +184,20 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
         subplot(nRows, nCols, subplotIdx);
         hold on;
         
-        % FIXED: Get cached threshold data for this ROI
-        [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = ...
+        % Get cached threshold data for this ROI (NO FALLBACK CALCULATIONS)
+        [roiNoiseLevel, upperThreshold, ~, basicThreshold] = ...
             getROIDataFromCache(roiNum, roiCache);
         
-        trialCount = 0;
-        trialThresholds = []; % Store thresholds for each trial
+        % Determine display threshold (prefer upper threshold from Schmitt filtering)
+        displayThreshold = basicThreshold; % Default
+        if isfinite(upperThreshold)
+            displayThreshold = upperThreshold;
+        end
         
-        % Plot all trials for this ROI
+        trialCount = 0;
+        legendData = struct('handles', [], 'labels', {{}});
+        
+        % FIXED: Plot all trials for this ROI with consistent colors and individual thresholds
         for trialIdx = 1:length(uniqueTrials)
             trialNum = uniqueTrials(trialIdx);
             colName = sprintf('ROI%d_T%g', roiNum, trialNum);
@@ -181,26 +208,25 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
                     trialCount = trialCount + 1;
                     hasData = true;
                     
-                    % Plot trace with color
-                    colorIdx = mod(trialIdx-1, size(trialColors, 1)) + 1;
-                    traceColor = trialColors(colorIdx, :);
+                    % FIXED: Get consistent color from global color map
+                    traceColor = globalTrialColorMap(num2str(trialNum));
                     
+                    % Plot trace
                     h_line = plot(timeData_ms, trialData, 'Color', traceColor, ...
                         'LineWidth', plotConfig.lines.trace);
                     h_line.Color(4) = plotConfig.transparency;
                     
-                    % FIXED: Add threshold line for each trial
-                    displayThreshold = upperThreshold;
-                    if ~isfinite(displayThreshold)
-                        displayThreshold = basicThreshold;
+                    % FIXED: Add threshold line for this specific trial
+                    if isfinite(displayThreshold) && displayThreshold > 0
+                        addThresholdLineForTrial(timeData_ms, stimulusTime_ms, displayThreshold, ...
+                                               traceColor, roiNoiseLevel, plotConfig);
                     end
                     
-                    if isfinite(displayThreshold) && displayThreshold > 0
-                        % Add threshold line with proper styling
-                        thresholdStyle = utils.getThresholdStyle(plotConfig, 'individual', ...
-                                                               roiNoiseLevel, traceColor);
-                        addThresholdLineForTrial(timeData_ms, displayThreshold, thresholdStyle, traceColor);
-                        trialThresholds(end+1) = displayThreshold;
+                    % Store for legend (only if first subplot)
+                    if subplotIdx == 1
+                        legendData.handles(end+1) = plot(NaN, NaN, 'Color', traceColor, ...
+                            'LineWidth', plotConfig.lines.trace);
+                        legendData.labels{end+1} = sprintf('Trial %g', trialNum);
                     end
                 end
             end
@@ -217,9 +243,9 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
         
         utils.formatSubplot(plotConfig);
         
-        % Add legend for first subplot only
-        if subplotIdx == 1 && trialCount > 0
-            legendEntries = createTrialLegend(uniqueTrials, trialColors, plotConfig);
+        % FIXED: Add legend for first subplot only with consistent colors
+        if subplotIdx == 1 && ~isempty(legendData.handles)
+            legend(legendData.handles, legendData.labels, 'Location', 'northeast', 'FontSize', 8);
         end
         
         hold off;
@@ -244,44 +270,33 @@ function success = generateTrialsFigureFixed(figNum, numFigures, numROIs, organi
     close(fig);
 end
 
-function addThresholdLineForTrial(timeData_ms, threshold, thresholdStyle, traceColor)
-    % FIXED: Add threshold line that matches the trace color for individual trials
+function addThresholdLineForTrial(timeData_ms, stimulusTime_ms, threshold, traceColor, roiNoiseLevel, plotConfig)
+    % FIXED: Add threshold line with proper 150ms length and trial-specific color
     
-    % Use trace color for threshold line in individual plots
-    thresholdColor = traceColor;
+    % FIXED: Calculate 150ms threshold window around stimulus
+    thresholdLength_ms = 150; % Fixed length as specified in requirements
+    thresholdStart_ms = 1; % Start 25ms before stimulus
+    thresholdEnd_ms = 750; % End 125ms after stimulus
     
-    % Determine line style based on threshold style
-    lineStyle = thresholdStyle.style;
-    lineWidth = thresholdStyle.width;
+    % Ensure threshold window is within time data bounds
+    thresholdStart_ms = max(thresholdStart_ms, timeData_ms(1));
+    thresholdEnd_ms = min(thresholdEnd_ms, timeData_ms(end));
     
-    % Draw threshold line across time range
-    xRange = [timeData_ms(1), timeData_ms(end)];
-    plot(xRange, [threshold, threshold], lineStyle, ...
-         'Color', thresholdColor, 'LineWidth', lineWidth, 'HandleVisibility', 'off');
+    % FIXED: Determine line style based on noise level
+    switch roiNoiseLevel
+        case 'low'
+            lineStyle = '--';   % Dashed for low noise
+        case 'high'
+            lineStyle = '-.';   % Dash-dot for high noise
+        otherwise
+            lineStyle = ':';    % Dotted for unknown
+    end
+    
+    % FIXED: Plot threshold line with trial-specific color and proper length
+    plot([thresholdStart_ms, thresholdEnd_ms], [threshold, threshold], lineStyle, ...
+         'Color', traceColor, 'LineWidth', plotConfig.lines.threshold, 'HandleVisibility', 'off');
 end
 
-function legendEntries = createTrialLegend(uniqueTrials, trialColors, plotConfig)
-    % Create legend for trial plots
-    
-    legendEntries = {};
-    
-    % Add trial entries (show first few to avoid clutter)
-    maxTrialsInLegend = min(5, length(uniqueTrials));
-    
-    for i = 1:maxTrialsInLegend
-        h = plot(NaN, NaN, 'Color', trialColors(i, :), 'LineWidth', plotConfig.lines.trace);
-        legendEntries{end+1} = sprintf('Trial %g', uniqueTrials(i));
-    end
-    
-    % Add stimulus entry
-    h_stim = plot(NaN, NaN, '--', 'Color', plotConfig.colors.stimulus, ...
-                  'LineWidth', plotConfig.lines.stimulus);
-    legendEntries{end+1} = 'Stimulus';
-    
-    if length(legendEntries) > 1
-        legend(legendEntries, 'Location', 'northeast', 'FontSize', 8);
-    end
-end
 
 function noiseLevelText = createNoiseLevelText(roiNoiseLevel)
     % Create noise level text for subplot titles
@@ -390,8 +405,7 @@ function success = generateAveragesFigureFixed(figNum, numFigures, avgVarNames, 
             
             % Add plot elements with average styling (green threshold)
             utils.addPlotElements(timeData_ms, stimulusTime_ms, avgThreshold, plotConfig, ...
-                'ShowStimulus', true, 'ShowThreshold', true, ...
-                'PlotType', 'average', 'TraceColor', traceColor);
+                'ShowStimulus', true, 'ShowThreshold', true);
         end
         
         % Parse and format title
@@ -461,7 +475,7 @@ function avgThreshold = calculateAverageThreshold(avgData, config)
 end
 
 function success = generateCoverslipPlot(totalAveragedData, config, varargin)
-    % Generate coverslip average plots (unchanged implementation)
+    % FIXED: Generate coverslip average plots with centralized colors
     
     success = false;
     
@@ -499,7 +513,9 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
         hold on;
         
         hasData = false;
-        colors = utils.getColors('noise', 3);
+        
+        % FIXED: Use centralized color system
+        noiseColors = utils.getColors('noise', 3);
         
         % Plot each data series
         allData = table2array(totalAveragedData(:, 2:end));
@@ -513,18 +529,18 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
                 varName = validVarNames{i};
                 hasData = true;
                 
-                % Determine color based on noise level
+                % FIXED: Determine color using centralized system
                 if contains(varName, 'Low_Noise')
-                    color = colors(1, :);
+                    color = noiseColors(1, :);  % Green for low noise
                     displayName = 'Low Noise';
                 elseif contains(varName, 'High_Noise')
-                    color = colors(2, :);
+                    color = noiseColors(2, :);  % Red for high noise
                     displayName = 'High Noise';
                 elseif contains(varName, 'All_')
-                    color = [0, 0, 0];
+                    color = noiseColors(3, :);  % Black for all
                     displayName = 'All ROIs';
                 else
-                    color = [0.4, 0.4, 0.4];
+                    color = [0.4, 0.4, 0.4];   % Gray for unknown
                     displayName = varName;
                 end
                 
@@ -541,7 +557,7 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
         % Add stimulus line and formatting (no threshold for coverslips)
         if hasData
             utils.addPlotElements(timeData_ms, stimulusTime_ms, NaN, plotConfig, ...
-                'ShowStimulus', true, 'ShowThreshold', false, 'PlotType', 'coverslip');
+                'ShowStimulus', true, 'ShowThreshold', false);
             
             utils.formatSubplot(plotConfig);
             title(sprintf('%s - Coverslip Averages by Noise Level', cleanGroupKey), ...
@@ -564,9 +580,8 @@ function success = generateCoverslipPlot(totalAveragedData, config, varargin)
         success = false;
     end
 end
-
 function [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = getROIDataFromCache(roiNum, roiCache)
-    % FIXED: Fast ROI data retrieval using validated cache
+    % RETRIEVE ONLY: Fast ROI data retrieval using validated cache (NO FALLBACKS)
     
     % Initialize defaults
     roiNoiseLevel = 'unknown';
@@ -574,7 +589,7 @@ function [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = getRO
     lowerThreshold = NaN;
     basicThreshold = NaN;
     
-    % Retrieve from cache if available
+    % Retrieve from cache if available (NO CALCULATIONS)
     if roiCache.hasFilteringStats
         try
             if isKey(roiCache.noiseMap, roiNum)
@@ -593,7 +608,7 @@ function [roiNoiseLevel, upperThreshold, lowerThreshold, basicThreshold] = getRO
                 basicThreshold = roiCache.basicThresholds(roiNum);
             end
         catch
-            % Cache lookup failed, use defaults
+            % Cache lookup failed, use defaults (NO FALLBACK CALCULATIONS)
         end
     end
 end

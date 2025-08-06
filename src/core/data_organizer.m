@@ -80,8 +80,8 @@ function [organizedData, averagedData, roiInfo] = organizeGroupData(groupData, g
 end
 
 function filteringStats = collectFilteringStats(groupData)
-    % Collect filtering statistics from processed files
-    % SIMPLIFIED: Only handle Schmitt data since that's what should be used
+    % FIXED: Collect filtering statistics with proper Schmitt data storage
+    % Ensures all required filtering data is available for ROI cache creation
     
     filteringStats = struct();
     filteringStats.available = false;
@@ -90,77 +90,162 @@ function filteringStats = collectFilteringStats(groupData)
     cfg = GluSnFRConfig();
     utils = string_utils(cfg);
     
+    % Initialize containers for collecting data from all files
+    allNoiseMap = containers.Map('KeyType', 'int32', 'ValueType', 'char');
+    allUpperThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
+    allLowerThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
+    allBasicThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
+    
+    foundSchmittData = false;
+    
     for i = 1:length(groupData)
         if ~isempty(groupData{i}) && isfield(groupData{i}, 'filterStats')
             stats = groupData{i}.filterStats;
             
-            % Check if Schmitt trigger results are available
-            if isfield(stats, 'schmitt_info')
-                filteringStats.available = true;
-                filteringStats.method = 'schmitt_trigger';
+            % CRITICAL: Check for Schmitt trigger results
+            if isfield(stats, 'schmitt_info') && isstruct(stats.schmitt_info)
+                schmittInfo = stats.schmitt_info;
                 
-                % Store ALL necessary data using ROI numbers as keys
-                if isfield(groupData{i}, 'roiNames')
-                    roiNames = groupData{i}.roiNames;
-                    roiNumbers = utils.extractROINumbers(roiNames);
+                % Verify all required Schmitt fields are present
+                if isfield(schmittInfo, 'noise_classification') && ...
+                   isfield(schmittInfo, 'upper_thresholds') && ...
+                   isfield(schmittInfo, 'lower_thresholds') && ...
+                   ~isempty(schmittInfo.noise_classification) && ...
+                   ~isempty(schmittInfo.upper_thresholds) && ...
+                   ~isempty(schmittInfo.lower_thresholds)
                     
-                    % Get Schmitt data
-                    noiseClassification = stats.schmitt_info.noise_classification;
-                    upperThresholds = stats.schmitt_info.upper_thresholds;
-                    lowerThresholds = stats.schmitt_info.lower_thresholds;
+                    foundSchmittData = true;
                     
-                    % Also get basic thresholds if available
-                    basicThresholds = [];
-                    if isfield(groupData{i}, 'thresholds')
-                        basicThresholds = groupData{i}.thresholds;
-                    end
-                    
-                    % Initialize containers.Map for storage
-                    filteringStats.roiNoiseMap = containers.Map('KeyType', 'int32', 'ValueType', 'char');
-                    filteringStats.roiUpperThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
-                    filteringStats.roiLowerThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
-                    filteringStats.roiBasicThresholds = containers.Map('KeyType', 'int32', 'ValueType', 'double');
-                    
-                    % Store using ROI numbers as keys
-                    for j = 1:length(roiNumbers)
-                        roiNum = roiNumbers(j);
-                        if j <= length(noiseClassification)
-                            filteringStats.roiNoiseMap(roiNum) = noiseClassification{j};
-                            filteringStats.roiUpperThresholds(roiNum) = upperThresholds(j);
-                            filteringStats.roiLowerThresholds(roiNum) = lowerThresholds(j);
+                    % Get ROI information for this file
+                    if isfield(groupData{i}, 'roiNames') && ~isempty(groupData{i}.roiNames)
+                        roiNames = groupData{i}.roiNames;
+                        roiNumbers = utils.extractROINumbers(roiNames);
+                        
+                        % Get Schmitt data
+                        noiseClassification = schmittInfo.noise_classification;
+                        upperThresholds = schmittInfo.upper_thresholds;
+                        lowerThresholds = schmittInfo.lower_thresholds;
+                        
+                        % Get basic thresholds
+                        basicThresholds = [];
+                        if isfield(groupData{i}, 'thresholds')
+                            basicThresholds = groupData{i}.thresholds;
+                        end
+                        
+                        % FIXED: Store data using ROI numbers as keys (handle all array types)
+                        numROIsToProcess = length(roiNumbers);
+                        
+                        for j = 1:numROIsToProcess
+                            roiNum = roiNumbers(j);
                             
-                            if ~isempty(basicThresholds) && j <= length(basicThresholds)
-                                filteringStats.roiBasicThresholds(roiNum) = basicThresholds(j);
+                            % Store noise classification
+                            if j <= length(noiseClassification)
+                                if iscell(noiseClassification)
+                                    noiseLevel = noiseClassification{j};
+                                else
+                                    noiseLevel = char(noiseClassification(j));
+                                end
+                                allNoiseMap(roiNum) = noiseLevel;
                             end
+                            
+                            % Store upper threshold
+                            if j <= length(upperThresholds)
+                                if iscell(upperThresholds)
+                                    upperThresh = upperThresholds{j};
+                                else
+                                    upperThresh = upperThresholds(j);
+                                end
+                                if isnumeric(upperThresh) && isfinite(upperThresh)
+                                    allUpperThresholds(roiNum) = double(upperThresh);
+                                end
+                            end
+                            
+                            % Store lower threshold
+                            if j <= length(lowerThresholds)
+                                if iscell(lowerThresholds)
+                                    lowerThresh = lowerThresholds{j};
+                                else
+                                    lowerThresh = lowerThresholds(j);
+                                end
+                                if isnumeric(lowerThresh) && isfinite(lowerThresh)
+                                    allLowerThresholds(roiNum) = double(lowerThresh);
+                                end
+                            end
+                            
+                            % Store basic threshold
+                            if ~isempty(basicThresholds) && j <= length(basicThresholds)
+                                basicThresh = basicThresholds(j);
+                                if isnumeric(basicThresh) && isfinite(basicThresh)
+                                    allBasicThresholds(roiNum) = double(basicThresh);
+                                end
+                            end
+                        end
+                        
+                        if cfg.debug.ENABLE_PLOT_DEBUG
+                            fprintf('    Collected Schmitt data for %d ROIs from file %d\n', numROIsToProcess, i);
+                        end
+                    end
+                else
+                    if cfg.debug.ENABLE_PLOT_DEBUG
+                        fprintf('    File %d: Incomplete Schmitt info structure\n', i);
+                        if isfield(schmittInfo, 'noise_classification')
+                            fprintf('      noise_classification: %s\n', class(schmittInfo.noise_classification));
+                        end
+                        if isfield(schmittInfo, 'upper_thresholds')
+                            fprintf('      upper_thresholds: %s\n', class(schmittInfo.upper_thresholds));
                         end
                     end
                 end
-                
-                % Success - we have Schmitt data
-                return;
-                
             else
-                % DEBUG: Why is Schmitt data missing?
-                fprintf('DEBUG: No schmitt_info found in filterStats for group %d\n', i);
-                if isfield(stats, 'method')
-                    fprintf('       Filter method used: %s\n', stats.method);
+                if cfg.debug.ENABLE_PLOT_DEBUG
+                    fprintf('    File %d: No schmitt_info found in filterStats\n', i);
+                    if isfield(stats, 'method')
+                        fprintf('      Filter method: %s\n', stats.method);
+                    end
                 end
-                fprintf('       Available fields: %s\n', strjoin(fieldnames(stats), ', '));
+            end
+        else
+            if cfg.debug.ENABLE_PLOT_DEBUG
+                fprintf('    File %d: No filterStats found\n', i);
             end
         end
     end
     
-    % If we get here, no Schmitt data was found
-    if cfg.filtering.USE_SCHMITT_TRIGGER
-        warning('Schmitt trigger is enabled but no Schmitt data found in any group files!');
-        fprintf('This suggests a problem with the Schmitt filter data storage.\n');
-        fprintf('Check that roi_filter is properly storing schmitt_info in filterStats.\n');
+    % FIXED: Package the collected data if Schmitt data was found
+    if foundSchmittData && ~isempty(allNoiseMap)
+        filteringStats.available = true;
+        filteringStats.method = 'schmitt_trigger';
+        filteringStats.roiNoiseMap = allNoiseMap;
+        filteringStats.roiUpperThresholds = allUpperThresholds;
+        filteringStats.roiLowerThresholds = allLowerThresholds;
+        filteringStats.roiBasicThresholds = allBasicThresholds;
+        
+        if cfg.debug.ENABLE_PLOT_DEBUG
+            fprintf('    Successfully collected Schmitt filtering statistics:\n');
+            fprintf('      ROIs with noise classification: %d\n', length(allNoiseMap));
+            fprintf('      ROIs with upper thresholds: %d\n', length(allUpperThresholds));
+            fprintf('      ROIs with lower thresholds: %d\n', length(allLowerThresholds));
+            fprintf('      ROIs with basic thresholds: %d\n', length(allBasicThresholds));
+        end
+    else
+        if cfg.debug.ENABLE_PLOT_DEBUG
+            if foundSchmittData
+                fprintf('    Found Schmitt data but no ROIs were processed successfully\n');
+            else
+                fprintf('    No Schmitt trigger data found in any group files\n');
+            end
+        end
+        
+        % Set to unavailable rather than creating fallback
+        filteringStats.available = false;
+        filteringStats.method = 'schmitt_unavailable';
+        
+        if cfg.filtering.USE_SCHMITT_TRIGGER
+            warning('Schmitt trigger is enabled but no complete Schmitt data found!');
+            fprintf('This suggests the roi_filter is not properly storing schmitt_info.\n');
+        end
     end
-    
-    % REMOVED: buildFromBasicThresholds fallback
-    % If Schmitt is enabled, it should work. If it doesn't, we need to fix it.
 end
-
 function [organizedData, averagedData, roiInfo] = organizeGroupDataPPF(groupData, groupMetadata, groupKey, cfg)
     % UPDATED: PPF-specific data organization with minimal output
     
@@ -361,14 +446,6 @@ function averagedTable = createPPFAveragedData(dataTable, coverslipFiles)
     end
 end
 
-function result = ternary(condition, trueVal, falseVal)
-    % Utility function for ternary operator
-    if condition
-        result = trueVal;
-    else
-        result = falseVal;
-    end
-end
 
 function [organizedData, averagedData, roiInfo] = organizeGroupData1AP(groupData, groupMetadata, cfg)
     % UPDATED: 1AP-specific data organization with minimal output

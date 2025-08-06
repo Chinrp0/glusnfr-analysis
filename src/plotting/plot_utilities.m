@@ -1,6 +1,6 @@
 function utils = plot_utilities()
-    % PLOT_UTILITIES - Centralized plotting utilities and configuration
-    % RETRIEVE ONLY: All functions get pre-calculated values using existing ROI number extraction
+    % PLOT_UTILITIES - CLEANED centralized plotting utilities 
+    % ONLY functions that are actually used by the plotting system
     
     utils.getPlotConfig = @getPlotConfig;
     utils.createFigure = @createFigure;
@@ -8,28 +8,23 @@ function utils = plot_utilities()
     utils.addPlotElements = @addPlotElements;
     utils.formatSubplot = @formatSubplot;
     utils.savePlot = @savePlot;
-    utils.getColors = @getColors;
+    utils.getColors = @getColors;  % FIXED: Consistent naming
     utils.extractGenotype = @extractGenotype;
-    utils.createLegend = @createLegend;
-    utils.addStimulusToLegend = @addStimulusToLegend;
-    utils.createTrialLegend = @createTrialLegend;
-    utils.getThresholdStyle = @getThresholdStyleFixed;  % FIXED function
-
-    % CALCULATE ONCE: Only for initial processing
-    utils.calculateNoiseLevelFromThreshold = @calculateNoiseLevelFromThreshold;  % Calculate during processing only
+    
+    % REMOVED: All unused legend functions, threshold style functions, and noise calculations
 end
 
 function plotConfig = getPlotConfig(glusnfrConfig)
-    % Centralized plotting configuration with enhanced threshold styling
+    % Centralized plotting configuration - CLEANED
     
     plotConfig = struct();
     
-    % Only pull essential settings from main config
+    % Essential settings from main config
     plotConfig.dpi = glusnfrConfig.plotting.DPI;
     plotConfig.maxPlotsPerFigure = glusnfrConfig.plotting.MAX_PLOTS_PER_FIGURE;
     plotConfig.timing = glusnfrConfig.timing;
     
-    % All visual settings centralized here
+    % Visual settings
     plotConfig.ylimits = [-0.02, 0.08];
     plotConfig.transparency = 0.7;
     
@@ -53,36 +48,14 @@ function plotConfig = getPlotConfig(glusnfrConfig)
     plotConfig.lines.threshold = 1.5;
     plotConfig.lines.stimulus = 1.5;
     
-    % Colors (all centralized here)
-    plotConfig.colors = struct();
-    plotConfig.colors.stimulus = [0, 0.8, 0];      % Green
-    plotConfig.colors.threshold = [0, 0.8, 0];     % Green (for averages)
-    plotConfig.colors.wt = [0, 0, 0];              % Black
-    plotConfig.colors.r213w = [1, 0, 1];           % Magenta
-    plotConfig.colors.lowNoise = [0.2, 0.6, 0.2];  % Green
-    plotConfig.colors.highNoise = [0.8, 0.2, 0.2]; % Red
-    plotConfig.colors.bothPeaks = [0, 0, 0];       % Black for both peaks
-    plotConfig.colors.singlePeak = [0.8, 0.2, 0.2]; % Red for single peak
-    
-    % FIXED: Threshold styling by context
-    plotConfig.threshold = struct();
-    plotConfig.threshold.default = struct(...
-        'color', [0, 0.8, 0], ...      % Green for averages
-        'width', 1.5, ...
-        'style', '--', ...
-        'length', '150');
-    
-    plotConfig.threshold.individual = struct(...
-        'color', 'match_trace', ...     % Match trace color for individuals
-        'width', 1.5, ...
-        'style', '--', ...              % Dashed for low noise
-        'length', '150');
-    
-    plotConfig.threshold.average = struct(...
-        'color', [0, 0.8, 0], ...      % Green for averages
-        'width', 1.5, ...
-        'style', '--', ...
-        'length', '150');
+    % Stimulus settings (universal across all plots)
+    plotConfig.stimulus = struct();
+    plotConfig.stimulus.style = 'line';
+    plotConfig.stimulus.color = [0, 0.8, 0]; % Green stimulus line
+    plotConfig.stimulus.width = 1.0;
+    plotConfig.stimulus.length = 'zero'; % From bottom to zero
+    plotConfig.stimulus.enableDual = true;
+    plotConfig.stimulus.ppfColor = [0, 0.8, 0.8]; % Cyan for second PPF stimulus
     
     % Figure type controls
     plotConfig.figureTypes = struct();
@@ -90,15 +63,59 @@ function plotConfig = getPlotConfig(glusnfrConfig)
     plotConfig.figureTypes.ppf = 'wide';
     plotConfig.figureTypes.coverslip = 'standard';
     plotConfig.figureTypes.autoSelect = true;
+end
+
+function colors = getColors(colorType, count)
+    % CENTRALIZED color system - ALL colors come from here only
     
-    % Stimulus line settings
-    plotConfig.stimulus = struct();
-    plotConfig.stimulus.style = 'line';
-    plotConfig.stimulus.color = [0, 0.8, 0];
-    plotConfig.stimulus.width = 1.0;
-    plotConfig.stimulus.length = 'zero';
-    plotConfig.stimulus.enableDual = true;
-    plotConfig.stimulus.ppfColor = [0, 0.8, 0.8];
+    if nargin < 2, count = 10; end
+    
+    switch lower(colorType)
+        case 'trials'
+            % Consistent trial colors for all plots
+            colors = [
+                0.0 0.4 0.8;    % Blue (Trial 1)
+                0.8 0.2 0.2;    % Red (Trial 2)
+                0.2 0.6 0.2;    % Green (Trial 3)
+                0.8 0.5 0.0;    % Orange (Trial 4)
+                0.6 0.2 0.8;    % Purple (Trial 5)
+                0.8 0.8 0.2;    % Yellow (Trial 6)
+                0.4 0.4 0.4;    % Gray (Trial 7)
+                0.0 0.8 0.8;    % Cyan (Trial 8)
+                0.8 0.0 0.8;    % Magenta (Trial 9)
+                0.0 0.0 0.0;    % Black (Trial 10)
+            ];
+            
+        case 'genotype'
+            colors = [
+                0.0 0.0 0.0;    % WT = Black
+                1.0 0.0 1.0;    % R213W = Magenta
+            ];
+            
+        case 'noise'
+            colors = [
+                0.2 0.6 0.2;    % Low noise = Green
+                0.8 0.2 0.2;    % High noise = Red
+                0.0 0.0 0.0;    % All = Black
+            ];
+            
+        case 'peaks'
+            colors = [
+                0.0 0.0 0.0;    % Both peaks = Black
+                0.8 0.2 0.2;    % Single peak = Red
+            ];
+            
+        otherwise
+            % Default to MATLAB's lines colormap
+            colors = lines(count);
+    end
+    
+    % Ensure we have enough colors
+    if size(colors, 1) < count
+        repeatFactor = ceil(count / size(colors, 1));
+        colors = repmat(colors, repeatFactor, 1);
+    end
+    colors = colors(1:count, :);
 end
 
 function fig = createFigure(figureType, titleText, plotConfig)
@@ -164,18 +181,14 @@ function [nRows, nCols] = calculateLayout(nSubplots)
 end
 
 function addPlotElements(timeData_ms, stimulusTime_ms, threshold, plotConfig, varargin)
-    % FIXED: Add plot elements with proper threshold handling
+    % Add plot elements - ONLY stimulus lines and average thresholds
+    % Individual trial thresholds are handled directly in plot_1ap.m
     
     % Parse optional inputs
     p = inputParser;
     addParameter(p, 'ShowStimulus', true, @islogical);
     addParameter(p, 'ShowThreshold', true, @islogical);
     addParameter(p, 'PPFTimepoint', [], @isnumeric);
-    addParameter(p, 'TraceColor', [], @isnumeric);
-    addParameter(p, 'NoiseLevel', 'unknown', @ischar);
-    addParameter(p, 'PlotType', 'individual', @ischar);
-    addParameter(p, 'UpperThreshold', [], @isnumeric);
-    addParameter(p, 'LowerThreshold', [], @isnumeric);
     parse(p, varargin{:});
     
     % Set y-limits first
@@ -195,93 +208,13 @@ function addPlotElements(timeData_ms, stimulusTime_ms, threshold, plotConfig, va
         end
     end
     
-    % FIXED: Add threshold line - this was the main issue
+    % Add threshold line (for averages only - trials handle their own thresholds)
     if p.Results.ShowThreshold && isfinite(threshold) && threshold > 0
-        % Use upper threshold if available, otherwise use basic threshold
-        displayThreshold = threshold;
-        if ~isempty(p.Results.UpperThreshold) && isfinite(p.Results.UpperThreshold)
-            displayThreshold = p.Results.UpperThreshold;
-        end
-        
-        % Get appropriate threshold styling
-        thresholdStyle = getThresholdStyleFixed(plotConfig, p.Results.PlotType, ...
-                                              p.Results.NoiseLevel, p.Results.TraceColor);
-        
-        % Add the threshold line
-        addThresholdLineFixed(timeData_ms, displayThreshold, thresholdStyle);
-    end
-end
-
-function thresholdStyle = getThresholdStyleFixed(plotConfig, plotType, noiseLevel, traceColor)
-    % FIXED: Get appropriate threshold styling based on context
-    
-    if strcmp(plotType, 'average') || strcmp(plotType, 'coverslip')
-        % For averages, always use green dashed line
-        thresholdStyle = plotConfig.threshold.average;
-        
-    else
-        % For individual plots, match trace color
-        thresholdStyle = plotConfig.threshold.individual;
-        
-        % Set color to match trace
-        if ~isempty(traceColor) && isnumeric(traceColor) && length(traceColor) >= 3
-            thresholdStyle.color = traceColor(1:3);  % Ensure RGB only
-        else
-            thresholdStyle.color = [0, 0, 0]; % Default to black
-        end
-        
-        % FIXED: Adjust line style based on noise level
-        if strcmp(noiseLevel, 'low')
-            thresholdStyle.style = '--';   % Dashed for low noise
-        elseif strcmp(noiseLevel, 'high')
-            thresholdStyle.style = '-.';   % Dash-dot for high noise
-        else
-            thresholdStyle.style = ':';    % Dotted for unknown
-        end
-    end
-end
-
-function addThresholdLineFixed(timeData_ms, threshold, thresholdStyle)
-    % FIXED: Add threshold line with proper x-range
-    
-    % Full x-range
-    xRange = [timeData_ms(1), timeData_ms(end)];
-    
-    % Plot threshold line
-    plot(xRange, [threshold, threshold], ...
-         thresholdStyle.style, 'Color', thresholdStyle.color, ...
-         'LineWidth', thresholdStyle.width, 'HandleVisibility', 'off');
-end
-
-
-
-function noiseLevel = calculateNoiseLevelFromThreshold(threshold, config)
-    % CALCULATE ONCE: Only used during initial processing phase
-    % Should NOT be called from plotting functions
-    
-    if nargin < 2
-        config = GluSnFRConfig();
-    end
-    
-    if isfinite(threshold)
-        if threshold <= config.thresholds.LOW_NOISE_CUTOFF
-            noiseLevel = 'low';
-        else
-            noiseLevel = 'high';
-        end
-    else
-        noiseLevel = 'unknown';
-    end
-    
-    % Add warning if called from plotting context
-    stack = dbstack();
-    if length(stack) > 1
-        for i = 2:length(stack)
-            if contains(stack(i).name, 'plot_') || contains(stack(i).file, 'plot')
-                warning('calculateNoiseLevelFromThreshold called from plotting function %s - should use pre-calculated values', stack(i).name);
-                break;
-            end
-        end
+        % Use green for average threshold lines (full length)
+        averageThresholdColor = [0, 0.8, 0]; % Green
+        plot([timeData_ms(1), timeData_ms(end)], [threshold, threshold], '--', ...
+             'Color', averageThresholdColor, 'LineWidth', plotConfig.lines.threshold, ...
+             'HandleVisibility', 'off');
     end
 end
 
@@ -302,35 +235,11 @@ function addStimulusLine(stimulusTime_ms, currentYLim, stimConfig)
             end
     end
     
-    % Draw stimulus based on style
-    switch lower(stimConfig.style)
-        case 'line'
-            plot([stimulusTime_ms, stimulusTime_ms], yRange, ...
-                 '--', 'Color', stimConfig.color, 'LineWidth', stimConfig.width, ...
-                 'HandleVisibility', 'off');
-                 
-        case 'marker'
-            % Place marker at bottom of plot
-            stimY = yRange(1) + 0.002;
-            plot(stimulusTime_ms, stimY, 'v', ...
-                 'Color', stimConfig.color, 'MarkerSize', 8, ...
-                 'MarkerFaceColor', stimConfig.color, 'HandleVisibility', 'off');
-                 
-        case 'pentagram'
-            % Place pentagram at bottom of plot
-            stimY = yRange(1) + 0.002;
-            plot(stimulusTime_ms, stimY, 'pentagram', ...
-                 'Color', stimConfig.color, 'MarkerSize', 8, ...
-                 'MarkerFaceColor', stimConfig.color, 'HandleVisibility', 'off');
-                 
-        otherwise
-            % Default to line
-            plot([stimulusTime_ms, stimulusTime_ms], yRange, ...
-                 ':', 'Color', stimConfig.color, 'LineWidth', stimConfig.width, ...
-                 'HandleVisibility', 'off');
-    end
+    % Draw stimulus line
+    plot([stimulusTime_ms, stimulusTime_ms], yRange, ...
+         '--', 'Color', stimConfig.color, 'LineWidth', stimConfig.width, ...
+         'HandleVisibility', 'off');
 end
-
 
 function formatSubplot(plotConfig)
     % Apply standard subplot formatting
@@ -370,44 +279,6 @@ function success = savePlot(fig, filepath, plotConfig)
     end
 end
 
-function colors = getColors(colorType, count)
-    % Get color scheme for different plot types
-    
-    if nargin < 2, count = 10; end
-    
-    switch lower(colorType)
-        case 'trials'
-            colors = [
-                0.0 0.0 0.0;    % Black
-                0.8 0.2 0.2;    % Red  
-                0.2 0.6 0.8;    % Blue
-                0.2 0.8 0.2;    % Green
-                0.8 0.5 0.2;    % Orange
-                0.6 0.2 0.8;    % Purple
-                0.8 0.8 0.2;    % Yellow
-                0.4 0.4 0.4;    % Gray
-                0.0 0.8 0.8;    % Cyan
-                0.8 0.0 0.8;    % Magenta
-            ];
-            
-        case 'genotype'
-            colors = [0, 0, 0; 1, 0, 1]; % WT=black, R213W=magenta
-            
-        case 'noise'
-            colors = [0.2, 0.6, 0.2; 0.8, 0.2, 0.2]; % Green=low, Red=high
-            
-        otherwise
-            colors = lines(count);
-    end
-    
-    % Ensure we have enough colors
-    if size(colors, 1) < count
-        repeatFactor = ceil(count / size(colors, 1));
-        colors = repmat(colors, repeatFactor, 1);
-    end
-    colors = colors(1:count, :);
-end
-
 function genotype = extractGenotype(groupKey)
     % Extract genotype from group key
     
@@ -417,164 +288,5 @@ function genotype = extractGenotype(groupKey)
         genotype = 'WT';
     else
         genotype = 'Unknown';
-    end
-end
-
-function legendHandle = createLegend(legendType, plotConfig, varargin)
-    % Create standardized legends for different plot types
-    
-    % Parse inputs
-    p = inputParser;
-    addParameter(p, 'Location', 'northeast', @ischar);
-    addParameter(p, 'FontSize', 9, @isnumeric);
-    addParameter(p, 'NumTrials', 10, @isnumeric);
-    addParameter(p, 'TrialNumbers', [], @isnumeric);
-    addParameter(p, 'Genotype', 'WT', @ischar);
-    addParameter(p, 'IncludeStimulus', false, @islogical);
-    addParameter(p, 'IncludeThreshold', false, @islogical);
-    parse(p, varargin{:});
-    
-    legendHandle = [];
-    
-    switch lower(legendType)
-        case 'trials'
-            legendHandle = createTrialLegend(plotConfig, p.Results);
-            
-        case 'noise_level'
-            legendHandle = createNoiseLevelLegend(plotConfig, p.Results);
-            
-        case 'genotype'
-            legendHandle = createGenotypeLegend(plotConfig, p.Results);
-            
-        case 'basic'
-            legendHandle = createBasicLegend(plotConfig, p.Results);
-    end
-end
-
-function legendHandle = createTrialLegend(plotConfig, options)
-    % Create legend for trial plots with consistent styling
-    
-    handles = [];
-    labels = {};
-    
-    % Get trial colors
-    trialColors = getColors('trials', options.NumTrials);
-    
-    % Add trial entries (only show first few to avoid clutter)
-    maxTrialsInLegend = min(5, options.NumTrials);
-    
-    if ~isempty(options.TrialNumbers)
-        trialsToShow = options.TrialNumbers(1:min(maxTrialsInLegend, length(options.TrialNumbers)));
-    else
-        trialsToShow = 1:maxTrialsInLegend;
-    end
-    
-    for i = 1:length(trialsToShow)
-        h = plot(NaN, NaN, 'Color', trialColors(i, :), 'LineWidth', plotConfig.lines.trace);
-        handles(end+1) = h;
-        labels{end+1} = sprintf('Trial %d', trialsToShow(i));
-    end
-    
-    % Add stimulus line if requested
-    if options.IncludeStimulus
-        hStim = plot(NaN, NaN, ':', 'Color', plotConfig.stimulus.color, 'LineWidth', plotConfig.stimulus.width);
-        handles(end+1) = hStim;
-        labels{end+1} = 'Stimulus';
-    end
-    
-    % Add threshold line if requested
-    if options.IncludeThreshold
-        hThresh = plot(NaN, NaN, plotConfig.threshold.default.style, 'Color', plotConfig.threshold.default.color, ...
-            'LineWidth', plotConfig.threshold.default.width);
-        handles(end+1) = hThresh;
-        labels{end+1} = 'Threshold';
-    end
-    
-    if ~isempty(handles)
-        legendHandle = legend(handles, labels, 'Location', options.Location, 'FontSize', options.FontSize);
-    end
-end
-
-function legendHandle = createNoiseLevelLegend(plotConfig, options)
-    % Create legend for noise level plots
-    
-    handles = [];
-    labels = {};
-    
-    % Add noise level entries
-    hLow = plot(NaN, NaN, 'Color', plotConfig.colors.lowNoise, 'LineWidth', 2);
-    handles(end+1) = hLow;
-    labels{end+1} = 'Low Noise';
-    
-    hHigh = plot(NaN, NaN, 'Color', plotConfig.colors.highNoise, 'LineWidth', 2);
-    handles(end+1) = hHigh;
-    labels{end+1} = 'High Noise';
-    
-    hAll = plot(NaN, NaN, 'Color', [0, 0, 0], 'LineWidth', 2);
-    handles(end+1) = hAll;
-    labels{end+1} = 'All ROIs';
-    
-    % Add stimulus line if requested
-    [handles, labels] = addStimulusToLegend(handles, labels, plotConfig, options);
-    
-    legendHandle = legend(handles, labels, 'Location', options.Location, 'FontSize', options.FontSize);
-end
-
-function legendHandle = createGenotypeLegend(plotConfig, options)
-    % Create legend for genotype plots
-    
-    handles = [];
-    labels = {};
-    
-    % Add genotype-specific color
-    if strcmp(options.Genotype, 'WT')
-        color = plotConfig.colors.wt;
-    elseif strcmp(options.Genotype, 'R213W')
-        color = plotConfig.colors.r213w;
-    else
-        color = [0, 0, 1]; % Blue for unknown
-    end
-    
-    h = plot(NaN, NaN, 'Color', color, 'LineWidth', 2);
-    handles(end+1) = h;
-    labels{end+1} = options.Genotype;
-    
-    % Add stimulus line if requested
-    [handles, labels] = addStimulusToLegend(handles, labels, plotConfig, options);
-    
-    legendHandle = legend(handles, labels, 'Location', options.Location, 'FontSize', options.FontSize);
-end
-
-function legendHandle = createBasicLegend(plotConfig, options)
-    % Create basic legend with average trace
-    
-    handles = [];
-    labels = {};
-    
-    % Add average trace
-    hAvg = plot(NaN, NaN, 'k-', 'LineWidth', plotConfig.lines.trace);
-    handles(end+1) = hAvg;
-    labels{end+1} = 'Average';
-    
-    % Add stimulus and threshold if requested
-    [handles, labels] = addStimulusToLegend(handles, labels, plotConfig, options);
-    
-    if options.IncludeThreshold
-        hThresh = plot(NaN, NaN, plotConfig.threshold.default.style, 'Color', plotConfig.threshold.default.color, ...
-            'LineWidth', plotConfig.threshold.default.width);
-        handles(end+1) = hThresh;
-        labels{end+1} = 'Threshold';
-    end
-    
-    legendHandle = legend(handles, labels, 'Location', options.Location, 'FontSize', options.FontSize);
-end
-
-function [handles, labels] = addStimulusToLegend(handles, labels, plotConfig, options)
-    % Helper function to add stimulus line to legend
-    
-    if options.IncludeStimulus
-        hStim = plot(NaN, NaN, ':', 'Color', plotConfig.stimulus.color, 'LineWidth', plotConfig.stimulus.width);
-        handles(end+1) = hStim;
-        labels{end+1} = 'Stimulus';
     end
 end

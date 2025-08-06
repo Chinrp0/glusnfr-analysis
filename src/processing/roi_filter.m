@@ -63,7 +63,7 @@ end
 %% ========================================================================
 
 function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIsSchmitt(dF_values, headers, thresholds, experimentType, varargin)
-    % Main Schmitt trigger filtering function using centralized config
+    % FIXED: Main Schmitt trigger filtering function with proper data storage format
     
     cfg = GluSnFRConfig();
     
@@ -87,7 +87,7 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
         filteredData = [];
         filteredHeaders = {};
         filteredThresholds = [];
-        stats = createEmptyStats(experimentType);
+        stats = createEmptyStatsFixed(experimentType);
         return;
     end
     
@@ -110,16 +110,92 @@ function [filteredData, filteredHeaders, filteredThresholds, stats] = filterROIs
     filteredHeaders = headers(schmittMask);
     filteredThresholds = thresholds(schmittMask);
     
-    % Step 5: Generate statistics
-    stats = generateSchmittStats(headers, schmittMask, noiseClassification, ...
-                                schmitt_details, experimentType, cfg);
+    % Step 5: Generate statistics with FIXED format
+    stats = generateSchmittStatsFixed(headers, schmittMask, noiseClassification, ...
+                                     upperThresholds, lowerThresholds, thresholds, ...
+                                     schmitt_details, experimentType, cfg);
+end
+
+
+function stats = generateSchmittStatsFixed(headers, schmittMask, noiseClassification, ...
+                                          upperThresholds, lowerThresholds, basicThresholds, ...
+                                          schmitt_details, experimentType, cfg)
+    % FIXED: Generate Schmitt statistics with proper format for cache system
     
-    % Add Schmitt-specific information
+    stats = struct();
+    stats.experimentType = experimentType;
+    stats.method = 'Schmitt Trigger';
+    stats.totalROIs = length(headers);
+    stats.passedROIs = sum(schmittMask);
+    stats.filterRate = stats.passedROIs / stats.totalROIs;
+    
+    % Noise level breakdown
+    passedNoise = noiseClassification(schmittMask);
+    stats.lowNoiseROIs = sum(strcmp(passedNoise, 'low'));
+    stats.highNoiseROIs = sum(strcmp(passedNoise, 'high'));
+    
+    % Schmitt trigger specific stats
+    triggered_count = sum(cellfun(@(x) x.triggered, schmitt_details));
+    valid_signals_total = sum(cellfun(@(x) x.valid_signals, schmitt_details));
+    invalid_signals_total = sum(cellfun(@(x) x.invalid_signals, schmitt_details));
+    
+    stats.triggered_rois = triggered_count;
+    stats.valid_signals_total = valid_signals_total;
+    stats.invalid_signals_total = invalid_signals_total;
+    stats.trigger_rate = triggered_count / stats.totalROIs;
+    
+    if triggered_count > 0
+        stats.signal_validity_rate = valid_signals_total / (valid_signals_total + invalid_signals_total);
+    else
+        stats.signal_validity_rate = 0;
+    end
+    
+    % CRITICAL: Store Schmitt info in the exact format expected by data_organizer
     stats.schmitt_info = struct();
-    stats.schmitt_info.upper_thresholds = upperThresholds;
-    stats.schmitt_info.lower_thresholds = lowerThresholds;
-    stats.schmitt_info.noise_classification = noiseClassification;
+    
+    % FIXED: Store as consistent arrays (not mixed cell/numeric)
+    stats.schmitt_info.noise_classification = noiseClassification;  % Cell array of strings
+    stats.schmitt_info.upper_thresholds = upperThresholds;         % Numeric array
+    stats.schmitt_info.lower_thresholds = lowerThresholds;         % Numeric array
+    stats.schmitt_info.basic_thresholds = basicThresholds;         % Numeric array (original 3σ)
+    
+    % Additional detail information
     stats.schmitt_info.details = schmitt_details;
+    stats.schmitt_info.passed_mask = schmittMask;
+    
+    % Configuration used
+    stats.configUsed = cfg.filtering.schmitt;
+    stats.configUsed.lowNoiseCutoff = cfg.thresholds.LOW_NOISE_CUTOFF;
+    
+    % Create summary string
+    stats.summary = sprintf('%s Schmitt: %d/%d ROIs passed (%.1f%%), %d triggered, %.1f%% signals valid', ...
+        experimentType, stats.passedROIs, stats.totalROIs, stats.filterRate*100, ...
+        stats.triggered_rois, stats.signal_validity_rate*100);
+    
+    if cfg.debug.ENABLE_PLOT_DEBUG
+        fprintf('    Generated Schmitt stats with %d ROIs, %d noise classifications\n', ...
+                length(basicThresholds), length(noiseClassification));
+    end
+end
+
+function stats = createEmptyStatsFixed(experimentType)
+    % FIXED: Create empty stats structure with proper format
+    stats = struct();
+    stats.experimentType = experimentType;
+    stats.method = 'Schmitt Trigger';
+    stats.totalROIs = 0;
+    stats.passedROIs = 0;
+    stats.filterRate = 0;
+    stats.summary = sprintf('%s Schmitt: No ROIs to filter', experimentType);
+    
+    % CRITICAL: Even empty stats need schmitt_info structure
+    stats.schmitt_info = struct();
+    stats.schmitt_info.noise_classification = {};
+    stats.schmitt_info.upper_thresholds = [];
+    stats.schmitt_info.lower_thresholds = [];
+    stats.schmitt_info.basic_thresholds = [];
+    stats.schmitt_info.details = {};
+    stats.schmitt_info.passed_mask = logical([]);
 end
 
 function [noiseClassification, upperThresholds, lowerThresholds] = calculateSchmittThresholds(baseThresholds, cfg)
@@ -298,57 +374,6 @@ function is_valid = validateSignalCharacteristics(trace, crossing_frame, decay_f
     is_valid = true;
 end
 
-function stats = generateSchmittStats(headers, schmittMask, noiseClassification, schmitt_details, experimentType, cfg)
-    % Generate comprehensive statistics for Schmitt trigger filtering
-    
-    stats = struct();
-    stats.experimentType = experimentType;
-    stats.method = 'Schmitt Trigger';
-    stats.totalROIs = length(headers);
-    stats.passedROIs = sum(schmittMask);
-    stats.filterRate = stats.passedROIs / stats.totalROIs;
-    
-    % Noise level breakdown
-    passedNoise = noiseClassification(schmittMask);
-    stats.lowNoiseROIs = sum(strcmp(passedNoise, 'low'));
-    stats.highNoiseROIs = sum(strcmp(passedNoise, 'high'));
-    
-    % Schmitt trigger specific stats
-    triggered_count = sum(cellfun(@(x) x.triggered, schmitt_details));
-    valid_signals_total = sum(cellfun(@(x) x.valid_signals, schmitt_details));
-    invalid_signals_total = sum(cellfun(@(x) x.invalid_signals, schmitt_details));
-    
-    stats.triggered_rois = triggered_count;
-    stats.valid_signals_total = valid_signals_total;
-    stats.invalid_signals_total = invalid_signals_total;
-    stats.trigger_rate = triggered_count / stats.totalROIs;
-    
-    if triggered_count > 0
-        stats.signal_validity_rate = valid_signals_total / (valid_signals_total + invalid_signals_total);
-    else
-        stats.signal_validity_rate = 0;
-    end
-    
-    % Configuration used
-    stats.configUsed = cfg.filtering.schmitt;
-    stats.configUsed.lowNoiseCutoff = cfg.thresholds.LOW_NOISE_CUTOFF;
-    
-    % Create summary string
-    stats.summary = sprintf('%s Schmitt: %d/%d ROIs passed (%.1f%%), %d triggered, %.1f%% signals valid', ...
-        experimentType, stats.passedROIs, stats.totalROIs, stats.filterRate*100, ...
-        stats.triggered_rois, stats.signal_validity_rate*100);
-end
-
-function stats = createEmptyStats(experimentType)
-    % Create empty stats structure
-    stats = struct();
-    stats.experimentType = experimentType;
-    stats.method = 'Schmitt Trigger';
-    stats.totalROIs = 0;
-    stats.passedROIs = 0;
-    stats.filterRate = 0;
-    stats.summary = sprintf('%s Schmitt: No ROIs to filter', experimentType);
-end
 
 %% ========================================================================
 %% EXISTING FUNCTIONS (Enhanced and Original filtering methods)
