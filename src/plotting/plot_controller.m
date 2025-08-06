@@ -260,7 +260,8 @@ function plotsGenerated = executePlotTasksSequential(tasks)
 end
 
 function success = executeSinglePlotTask(task)
-    % Execute a single plotting task WITH CACHE
+    % Execute a single plotting task
+    % FIXED: Cache is already in task structure, don't pass separately
     
     success = false;
     config = GluSnFRConfig();
@@ -268,11 +269,11 @@ function success = executeSinglePlotTask(task)
     try
         if strcmp(task.experimentType, '1AP')
             plot1AP = plot_1ap();
-            % Pass roiCache in task structure
-            success = plot1AP.execute(task, config, 'roiCache', task.roiCache);
+            % The task ALREADY contains roiCache - don't pass it again!
+            success = plot1AP.execute(task, config);
         elseif strcmp(task.experimentType, 'PPF')
             plotPPF = plot_ppf();
-            success = plotPPF.execute(task, config, 'roiCache', task.roiCache);
+            success = plotPPF.execute(task, config);
         end
     catch ME
         if config.debug.ENABLE_PLOT_DEBUG

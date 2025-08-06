@@ -8,31 +8,39 @@ function plot1AP = plot_1ap()
 end
 
 function success = executePlotTask(task, config, varargin)
-    % Execute a 1AP plotting task with standardized signature
+    % Execute a 1AP plotting task with ROI cache from task structure
     
     success = false;
+    
+    % Extract roiCache from task if available
+    if isfield(task, 'roiCache')
+        roiCache = task.roiCache;
+    else
+        roiCache = [];  % No cache available
+    end
     
     try
         switch task.type
             case 'trials'
                 success = generateTrialsPlot(task.data, config, ...
-                    'roiInfo', task.roiInfo, 'groupKey', task.groupKey, ...
-                    'outputFolder', task.outputFolder, varargin{:});
+                    'roiInfo', task.roiInfo, 'roiCache', roiCache, ...
+                    'groupKey', task.groupKey, 'outputFolder', task.outputFolder);
                     
             case 'averages'
                 success = generateAveragesPlot(task.data, config, ...
-                    'roiInfo', task.roiInfo, 'groupKey', task.groupKey, ...
-                    'outputFolder', task.outputFolder, varargin{:});
+                    'roiInfo', task.roiInfo, 'roiCache', roiCache, ...
+                    'groupKey', task.groupKey, 'outputFolder', task.outputFolder);
                     
             case 'coverslip'
                 success = generateCoverslipPlot(task.data, config, ...
-                    'roiInfo', task.roiInfo, 'groupKey', task.groupKey, ...
-                    'outputFolder', task.outputFolder, varargin{:});
+                    'roiInfo', task.roiInfo, 'roiCache', roiCache, ...
+                    'groupKey', task.groupKey, 'outputFolder', task.outputFolder);
         end
         
     catch ME
         if config.debug.ENABLE_PLOT_DEBUG
             fprintf('    1AP plot task failed: %s\n', ME.message);
+            fprintf('    Stack: %s (line %d)\n', ME.stack(1).name, ME.stack(1).line);
         end
         success = false;
     end
