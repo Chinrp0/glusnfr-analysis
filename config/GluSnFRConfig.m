@@ -169,7 +169,7 @@ function config = GluSnFRConfig()
     config.debug.PLOT_THRESHOLD_DISTRIBUTION = false;
     config.debug.ENABLE_PROFILING = false;
     config.debug.LOG_LEVEL = 'INFO';                      % 'DEBUG', 'INFO', 'WARNING', 'ERROR'
-    config.debug.ENABLE_PLOT_DEBUG = false;               % Debug mode for plotting
+    config.debug.ENABLE_PLOT_DEBUG = true;               % Debug mode for plotting
 end
 
 function performanceConfig = getOptimalPerformanceSettings()

@@ -8,22 +8,24 @@ function controller = plot_controller()
 end
 
 function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outputFolders)
-    % Main plotting dispatcher - replaces plot_generator.generateGroupPlots
+    % Main plotting dispatcher with ROI cache optimization
     
     config = GluSnFRConfig();
-    roiCache = createROICache(roiInfo);
     
     % Quick validation - exit early if no data
     if ~hasValidPlotData(organizedData, roiInfo, config)
         return;
     end
     
+    % CREATE ROI CACHE HERE - This is the optimization
+    roiCache = createROICache(roiInfo);
+    
     % Set up plotting environment
     setupPlotEnvironment();
     
-    % Create plot tasks based on experiment type and configuration
+    % Create plot tasks with cache included
     tasks = createPlotTasks(organizedData, averagedData, roiInfo, roiCache, groupKey, outputFolders, config);
-
+    
     if isempty(tasks)
         return;
     end
@@ -258,7 +260,7 @@ function plotsGenerated = executePlotTasksSequential(tasks)
 end
 
 function success = executeSinglePlotTask(task)
-    % Execute a single plotting task
+    % Execute a single plotting task WITH CACHE
     
     success = false;
     config = GluSnFRConfig();
@@ -266,12 +268,16 @@ function success = executeSinglePlotTask(task)
     try
         if strcmp(task.experimentType, '1AP')
             plot1AP = plot_1ap();
-            success = plot1AP.execute(task, config);
+            % Pass roiCache in task structure
+            success = plot1AP.execute(task, config, 'roiCache', task.roiCache);
         elseif strcmp(task.experimentType, 'PPF')
             plotPPF = plot_ppf();
-            success = plotPPF.execute(task, config);
+            success = plotPPF.execute(task, config, 'roiCache', task.roiCache);
         end
-    catch
+    catch ME
+        if config.debug.ENABLE_PLOT_DEBUG
+            fprintf('    Plot task failed: %s\n', ME.message);
+        end
         success = false;
     end
 end

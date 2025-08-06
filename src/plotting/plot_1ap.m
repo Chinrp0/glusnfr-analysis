@@ -39,18 +39,20 @@ function success = executePlotTask(task, config, varargin)
 end
 
 function success = generateTrialsPlot(organizedData, config, varargin)
-    % Generate individual trials plots with per-trial threshold styling
+    % Generate individual trials plots with ROI cache optimization
     
     success = false;
     
-    % Parse inputs
+    % Parse inputs INCLUDING roiCache
     p = inputParser;
     addParameter(p, 'roiInfo', [], @isstruct);
+    addParameter(p, 'roiCache', [], @isstruct);  % ADD THIS
     addParameter(p, 'groupKey', '', @ischar);
     addParameter(p, 'outputFolder', '', @ischar);
     parse(p, varargin{:});
     
     roiInfo = p.Results.roiInfo;
+    roiCache = p.Results.roiCache;  % ADD THIS
     groupKey = p.Results.groupKey;
     outputFolder = p.Results.outputFolder;
     
@@ -84,10 +86,10 @@ function success = generateTrialsPlot(organizedData, config, varargin)
             return;
         end
         
-        % Generate figures
+        % Pass roiCache to generateTrialsFigure
         for figNum = 1:numFigures
             success = generateTrialsFigure(figNum, numFigures, numROIs, organizedData, ...
-                roiInfo, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
+                roiInfo, roiCache, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
                 cleanGroupKey, outputFolder, utils, plotConfig, config) || success;
         end
         
@@ -99,10 +101,11 @@ function success = generateTrialsPlot(organizedData, config, varargin)
     end
 end
 
+% FIX 3: Update generateTrialsFigure to use roiCache properly
 function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedData, ...
-    roiInfo, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
+    roiInfo, roiCache, timeData_ms, stimulusTime_ms, uniqueTrials, trialColors, ...
     cleanGroupKey, outputFolder, utils, plotConfig, config)
-    % OPTIMIZED: Use pre-calculated noise levels and thresholds
+    % WITH CACHE OPTIMIZATION - No redundant lookups!
     
     success = false;
     
@@ -125,9 +128,36 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
         
         trialCount = 0;
         
-        % Pre-calculate noise level for this ROI (avoid recalculation in loop)
-        roiName = sprintf('ROI %03d', originalROI);
-        [roiNoiseLevel, upperThreshold, lowerThreshold, ~] = getROIDataFromCache(roiName, roiCache);
+        % USE CACHE FOR FAST LOOKUP - This is the optimization!
+        roiNoiseLevel = 'unknown';
+        upperThreshold = NaN;
+        lowerThreshold = NaN;
+        basicThreshold = NaN;
+        
+        if ~isempty(roiCache) && roiCache.hasFilteringStats
+            % O(1) lookups using cache instead of repeated string parsing
+            if isKey(roiCache.noiseMap, originalROI)
+                roiNoiseLevel = roiCache.noiseMap(originalROI);
+            end
+            
+            if isKey(roiCache.upperThresholds, originalROI)
+                upperThreshold = roiCache.upperThresholds(originalROI);
+            end
+            
+            if isKey(roiCache.lowerThresholds, originalROI)
+                lowerThreshold = roiCache.lowerThresholds(originalROI);
+            end
+            
+            if isKey(roiCache.basicThresholds, originalROI)
+                basicThreshold = roiCache.basicThresholds(originalROI);
+            end
+        else
+            % Fallback if cache not available (shouldn't happen)
+            if isfield(roiInfo, 'roiNoiseMap') && isa(roiInfo.roiNoiseMap, 'containers.Map') && ...
+               isKey(roiInfo.roiNoiseMap, originalROI)
+                roiNoiseLevel = roiInfo.roiNoiseMap(originalROI);
+            end
+        end
         
         % Plot trials for this ROI
         for i = 1:length(uniqueTrials)
@@ -147,16 +177,19 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
                         'LineWidth', plotConfig.lines.trace);
                     h_line.Color(4) = plotConfig.transparency;
                     
-                    % Use appropriate threshold for display
-                   trialIdx = find(roiInfo.originalTrialNumbers == trialNum, 1);
-                   if isempty(trialIdx)
-                       trialIdx = i; % Use loop index as fallback
-                   end
-                   displayThreshold = getValidThreshold(roiIdx, trialIdx, roiInfo, config);
-
+                    % Use cached Schmitt upper threshold if available
+                    displayThreshold = upperThreshold;
+                    if ~isfinite(displayThreshold)
+                        % Fallback to basic threshold
+                        trialIdx = find(roiInfo.originalTrialNumbers == trialNum, 1);
+                        if isempty(trialIdx)
+                            trialIdx = i;
+                        end
+                        displayThreshold = getValidThreshold(roiIdx, trialIdx, roiInfo, config);
+                    end
                     
                     % Add threshold line with pre-calculated styling
-                    if isfinite(displayThreshold)
+                    if isfinite(displayThreshold) && displayThreshold > 0
                         utils.addPlotElements(timeData_ms, stimulusTime_ms, displayThreshold, plotConfig, ...
                             'ShowStimulus', false, 'ShowThreshold', true, ...
                             'PlotType', 'individual', 'NoiseLevel', roiNoiseLevel, ...
@@ -171,7 +204,7 @@ function success = generateTrialsFigure(figNum, numFigures, numROIs, organizedDa
         utils.addPlotElements(timeData_ms, stimulusTime_ms, NaN, plotConfig, ...
             'ShowStimulus', true, 'ShowThreshold', false);
         
-        % Format title with pre-calculated noise level
+        % Format title with cached noise level
         noiseLevelText = createNoiseLevelSummary(roiNoiseLevel, trialCount);
         
         title(sprintf('ROI %d%s (n=%d)', originalROI, noiseLevelText, trialCount), ...
