@@ -1,11 +1,16 @@
 function controller = plot_controller()
-    % PLOT_CONTROLLER - Central plotting orchestration (FIXED)
-    % Eliminates redundant computations and ensures only filtered data is plotted
+    % PLOT_CONTROLLER - Enhanced plotting orchestration with modular architecture
+    % 
+    % KEY IMPROVEMENTS:
+    % - Uses dedicated ROI cache module for cache management
+    % - Delegates to specialized plot generators
+    % - Eliminates all legacy threshold calculations
+    % - Centralized configuration and styling
     
     controller.generateGroupPlots = @generateGroupPlots;
     controller.shouldUseParallel = @shouldUseParallel;
     controller.createPlotTasks = @createPlotTasks;
-    controller.validateROICache = @validateROICache;  % NEW: Cache validation
+    controller.validateROICache = @validateROICache;
 end
 
 function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outputFolders)
@@ -21,318 +26,94 @@ function generateGroupPlots(organizedData, averagedData, roiInfo, groupKey, outp
         return;
     end
     
-    % FIXED: Create and validate ROI cache
-    roiCache = createROICacheFixed(roiInfo, organizedData, averagedData);
+    % FIXED: Use dedicated ROI cache module
+    cache_manager = roi_cache();
+    roiCache = cache_manager.create(roiInfo, organizedData, roiInfo.experimentType);
     
-    if ~validateROICache(roiCache, roiInfo)
-        if config.debug.ENABLE_PLOT_DEBUG
-            fprintf('    ROI cache validation failed for group %s\n', groupKey);
+    if ~cache_manager.validate(roiCache)
+        % DETAILED ERROR REPORTING for invalid cache
+        fprintf('    ❌ ROI cache validation FAILED for group %s\n', groupKey);
+        
+        if isfield(roiCache, 'errorMessage') && ~isempty(roiCache.errorMessage)
+            fprintf('       Error: %s\n', roiCache.errorMessage);
         end
+        
+        % Detailed diagnostics
+        if isstruct(roiCache)
+            fprintf('       Cache diagnostics:\n');
+            fprintf('         - Valid flag: %s\n', string(roiCache.valid));
+            fprintf('         - Experiment type: %s\n', roiCache.experimentType);
+            fprintf('         - Has filtering stats: %s\n', string(roiCache.hasFilteringStats));
+            
+            if isfield(roiCache, 'numbers')
+                fprintf('         - ROI count: %d\n', length(roiCache.numbers));
+                if ~isempty(roiCache.numbers)
+                    fprintf('         - ROI range: %d - %d\n', min(roiCache.numbers), max(roiCache.numbers));
+                end
+            else
+                fprintf('         - ROI numbers: MISSING\n');
+            end
+            
+            if roiCache.hasFilteringStats
+                fprintf('       Filtering statistics status:\n');
+                if isfield(roiCache, 'noiseMap') && isa(roiCache.noiseMap, 'containers.Map')
+                    fprintf('         - Noise classifications: %d ROIs\n', length(roiCache.noiseMap));
+                else
+                    fprintf('         - Noise classifications: INVALID/MISSING\n');
+                end
+                
+                if isfield(roiCache, 'upperThresholds') && isa(roiCache.upperThresholds, 'containers.Map')
+                    fprintf('         - Upper thresholds: %d ROIs\n', length(roiCache.upperThresholds));
+                else
+                    fprintf('         - Upper thresholds: INVALID/MISSING\n');
+                end
+                
+                if isfield(roiCache, 'standardDeviations') && isa(roiCache.standardDeviations, 'containers.Map')
+                    fprintf('         - Standard deviations: %d ROIs\n', length(roiCache.standardDeviations));
+                else
+                    fprintf('         - Standard deviations: INVALID/MISSING\n');
+                end
+            end
+        else
+            fprintf('       Cache is not a valid structure\n');
+        end
+        
+        fprintf('       → Skipping plot generation for this group\n\n');
         return;
     end
     
     % Set up plotting environment
     setupPlotEnvironment();
     
-    % Create plot tasks with validated cache
-    tasks = createPlotTasks(organizedData, averagedData, roiInfo, roiCache, groupKey, outputFolders, config);
-    
-    if isempty(tasks)
+    try
+        % Create plot tasks with validated cache
+        tasks = createPlotTasks(organizedData, averagedData, roiInfo, roiCache, groupKey, outputFolders, config);
+        
+        if isempty(tasks)
+            if config.debug.ENABLE_PLOT_DEBUG
+                fprintf('    No plot tasks created for group %s\n', groupKey);
+            end
+            return;
+        end
+        
+        % Execute plotting with enhanced error handling
+        plotsGenerated = executePlotTasks(tasks, config);
+        
         if config.debug.ENABLE_PLOT_DEBUG
-            fprintf('    No plot tasks created for group %s\n', groupKey);
+            fprintf('    Generated %d plots for group %s\n', plotsGenerated, groupKey);
         end
+        
+    catch ME
+        if config.debug.ENABLE_PLOT_DEBUG
+            fprintf('    Plot generation error for group %s: %s\n', groupKey, ME.message);
+        end
+    finally
         cleanupPlotEnvironment();
-        return;
-    end
-    
-    % Execute plotting
-    if shouldUseParallel(tasks, config)
-        plotsGenerated = executePlotTasksParallel(tasks);
-    else
-        plotsGenerated = executePlotTasksSequential(tasks);
-    end
-    
-    if config.debug.ENABLE_PLOT_DEBUG
-        fprintf('    Generated %d plots for group %s\n', plotsGenerated, groupKey);
-    end
-    
-    cleanupPlotEnvironment();
-end
-
-function roiCache = createROICacheFixed(roiInfo, organizedData, averagedData)
-    % FIXED: Create ROI cache with proper filtering statistics and NO fallbacks
-    
-    roiCache = struct();
-    roiCache.valid = false;
-    roiCache.experimentType = roiInfo.experimentType;
-    roiCache.hasFilteringStats = false;
-    roiCache.numbers = [];
-    
-    try
-        cfg = GluSnFRConfig();
-        utils = string_utils(cfg);
-        
-        % FIXED: Handle different experiment types properly
-        if strcmp(roiInfo.experimentType, '1AP')
-            roiCache = create1APCacheFixed(roiInfo, organizedData, averagedData, utils, cfg);
-        elseif strcmp(roiInfo.experimentType, 'PPF')
-            roiCache = createPPFCacheFixed(roiInfo, organizedData, averagedData, utils, cfg);
-        end
-        
-    catch ME
-        if cfg.debug.ENABLE_PLOT_DEBUG
-            fprintf('    Cache creation failed: %s\n', ME.message);
-        end
-        roiCache.valid = false;
-    end
-end
-
-function roiCache = create1APCacheFixed(roiInfo, organizedData, averagedData, utils, cfg)
-    % FIXED: Create cache for 1AP experiments with complete filtering statistics
-    
-    roiCache = struct();
-    roiCache.experimentType = '1AP';
-    roiCache.valid = false;
-    roiCache.hasFilteringStats = false;
-    
-    % Extract ROI numbers from organized data (these are the FILTERED ROIs only)
-    if istable(organizedData) && width(organizedData) > 1
-        varNames = organizedData.Properties.VariableNames(2:end); % Skip Frame column
-        roiNumbers = [];
-        
-        for i = 1:length(varNames)
-            roiMatch = regexp(varNames{i}, 'ROI(\d+)_T', 'tokens');
-            if ~isempty(roiMatch)
-                roiNumbers(end+1) = str2double(roiMatch{1}{1});
-            end
-        end
-        
-        if ~isempty(roiNumbers)
-            uniqueROIs = unique(roiNumbers);
-            roiCache.numbers = sort(uniqueROIs);
-            
-            % Create lookup maps
-            roiCache.numberToIndex = containers.Map('KeyType', 'int32', 'ValueType', 'int32');
-            for i = 1:length(roiCache.numbers)
-                roiCache.numberToIndex(roiCache.numbers(i)) = i;
-            end
-            
-            % CRITICAL: Extract filtering statistics from roiInfo (from pipeline processing)
-            if isfield(roiInfo, 'filteringStats') && ...
-               isstruct(roiInfo.filteringStats) && ...
-               isfield(roiInfo.filteringStats, 'available') && ...
-               roiInfo.filteringStats.available && ...
-               strcmp(roiInfo.filteringStats.method, 'schmitt_trigger')
-                
-                % REQUIRED: All filtering statistics must be present and properly populated
-                if isfield(roiInfo.filteringStats, 'roiNoiseMap') && ...
-                   isa(roiInfo.filteringStats.roiNoiseMap, 'containers.Map') && ...
-                   isfield(roiInfo.filteringStats, 'roiUpperThresholds') && ...
-                   isa(roiInfo.filteringStats.roiUpperThresholds, 'containers.Map') && ...
-                   isfield(roiInfo.filteringStats, 'roiLowerThresholds') && ...
-                   isa(roiInfo.filteringStats.roiLowerThresholds, 'containers.Map') && ...
-                   isfield(roiInfo.filteringStats, 'roiStandardDeviations') && ...
-                   isa(roiInfo.filteringStats.roiStandardDeviations, 'containers.Map')
-                    
-                    % FIXED: Store the complete filtering statistics
-                    roiCache.hasFilteringStats = true;
-                    roiCache.noiseMap = roiInfo.filteringStats.roiNoiseMap;
-                    roiCache.upperThresholds = roiInfo.filteringStats.roiUpperThresholds;
-                    roiCache.lowerThresholds = roiInfo.filteringStats.roiLowerThresholds;
-                    roiCache.standardDeviations = roiInfo.filteringStats.roiStandardDeviations;
-                    
-                    if cfg.debug.ENABLE_PLOT_DEBUG
-                        fprintf('    Cache: Using Schmitt filtering statistics (%d ROIs with complete data)\n', ...
-                                length(roiCache.noiseMap));
-                    end
-                else
-                    if cfg.debug.ENABLE_PLOT_DEBUG
-                        fprintf('    Cache: Incomplete Schmitt statistics - missing required maps\n');
-                    end
-                end
-            else
-                if cfg.debug.ENABLE_PLOT_DEBUG
-                    fprintf('    Cache: No Schmitt filtering statistics available\n');
-                    if isfield(roiInfo, 'filteringStats')
-                        if isfield(roiInfo.filteringStats, 'method')
-                            fprintf('           Filtering method used: %s\n', roiInfo.filteringStats.method);
-                        end
-                        fprintf('           Available: %s\n', ...
-                                string(roiInfo.filteringStats.available));
-                    end
-                end
-            end
-            
-            % REMOVED: No fallback calculations - if filtering stats aren't available, 
-            % that means the pipeline didn't generate them properly
-            
-            roiCache.valid = true;
-        end
-    end
-end
-
-function roiCache = createPPFCacheFixed(roiInfo, organizedData, averagedData, utils, cfg)
-    % FIXED: Create cache for PPF experiments with complete filtering statistics
-    
-    roiCache = struct();
-    roiCache.experimentType = 'PPF';
-    roiCache.valid = false;
-    roiCache.hasFilteringStats = false;
-    
-    % Extract ROI numbers from PPF organized data
-    if isstruct(organizedData)
-        % Get primary data table
-        if isfield(organizedData, 'allData') && istable(organizedData.allData) && width(organizedData.allData) > 1
-            dataTable = organizedData.allData;
-        elseif isfield(organizedData, 'bothPeaks') && istable(organizedData.bothPeaks) && width(organizedData.bothPeaks) > 1
-            dataTable = organizedData.bothPeaks;
-        elseif isfield(organizedData, 'singlePeak') && istable(organizedData.singlePeak) && width(organizedData.singlePeak) > 1
-            dataTable = organizedData.singlePeak;
-        else
-            return; % No valid data
-        end
-        
-        varNames = dataTable.Properties.VariableNames(2:end); % Skip Frame column
-        roiNumbers = [];
-        
-        for i = 1:length(varNames)
-            roiMatch = regexp(varNames{i}, 'ROI(\d+)', 'tokens');
-            if ~isempty(roiMatch)
-                roiNumbers(end+1) = str2double(roiMatch{1}{1});
-            end
-        end
-        
-        if ~isempty(roiNumbers)
-            uniqueROIs = unique(roiNumbers);
-            roiCache.numbers = sort(uniqueROIs);
-            
-            % Create lookup maps
-            roiCache.numberToIndex = containers.Map('KeyType', 'int32', 'ValueType', 'int32');
-            for i = 1:length(roiCache.numbers)
-                roiCache.numberToIndex(roiCache.numbers(i)) = i;
-            end
-            
-            % CRITICAL: Extract filtering statistics (same logic as 1AP)
-            if isfield(roiInfo, 'filteringStats') && ...
-               isstruct(roiInfo.filteringStats) && ...
-               isfield(roiInfo.filteringStats, 'available') && ...
-               roiInfo.filteringStats.available && ...
-               strcmp(roiInfo.filteringStats.method, 'schmitt_trigger')
-                
-                % REQUIRED: All filtering statistics must be present
-                if isfield(roiInfo.filteringStats, 'roiNoiseMap') && ...
-                   isa(roiInfo.filteringStats.roiNoiseMap, 'containers.Map') && ...
-                   isfield(roiInfo.filteringStats, 'roiUpperThresholds') && ...
-                   isa(roiInfo.filteringStats.roiUpperThresholds, 'containers.Map') && ...
-                   isfield(roiInfo.filteringStats, 'roiLowerThresholds') && ...
-                   isa(roiInfo.filteringStats.roiLowerThresholds, 'containers.Map') && ...
-                   isfield(roiInfo.filteringStats, 'roiStandardDeviations') && ...
-                   isa(roiInfo.filteringStats.roiStandardDeviations, 'containers.Map')
-                    
-                    roiCache.hasFilteringStats = true;
-                    roiCache.noiseMap = roiInfo.filteringStats.roiNoiseMap;
-                    roiCache.upperThresholds = roiInfo.filteringStats.roiUpperThresholds;
-                    roiCache.lowerThresholds = roiInfo.filteringStats.roiLowerThresholds;
-                    roiCache.standardDeviations = roiInfo.filteringStats.roiStandardDeviations;
-                    
-                    if cfg.debug.ENABLE_PLOT_DEBUG
-                        fprintf('    PPF Cache: Using Schmitt filtering statistics (%d ROIs)\n', ...
-                                length(roiCache.noiseMap));
-                    end
-                end
-            end
-            
-            % REMOVED: No fallback calculations for PPF either
-            
-            roiCache.valid = true;
-        end
-    end
-end
-
-function isValid = validateROICache(roiCache, roiInfo)
-    % ENHANCED: Validate that ROI cache contains all required data for plotting
-    
-    isValid = false;
-    
-    try
-        % Basic structure validation
-        if ~isstruct(roiCache) || ~isfield(roiCache, 'valid') || ~roiCache.valid
-            return;
-        end
-        
-        % Check required fields
-        requiredFields = {'numbers', 'numberToIndex', 'experimentType', 'hasFilteringStats'};
-        for i = 1:length(requiredFields)
-            if ~isfield(roiCache, requiredFields{i})
-                fprintf('    Cache validation failed: missing field %s\n', requiredFields{i});
-                return;
-            end
-        end
-        
-        % Check that we have ROI numbers
-        if isempty(roiCache.numbers) || ~isnumeric(roiCache.numbers)
-            fprintf('    Cache validation failed: no valid ROI numbers\n');
-            return;
-        end
-        
-        % Check that maps are properly sized
-        if ~isa(roiCache.numberToIndex, 'containers.Map') || ...
-           length(roiCache.numberToIndex) ~= length(roiCache.numbers)
-            fprintf('    Cache validation failed: numberToIndex map size mismatch\n');
-            return;
-        end
-        
-        % CRITICAL: If filtering statistics are claimed to be available, validate them completely
-        if roiCache.hasFilteringStats
-            requiredMaps = {'noiseMap', 'upperThresholds', 'lowerThresholds', 'standardDeviations'};
-            for i = 1:length(requiredMaps)
-                mapName = requiredMaps{i};
-                if ~isfield(roiCache, mapName)
-                    fprintf('    Cache validation failed: missing %s\n', mapName);
-                    return;
-                elseif ~isa(roiCache.(mapName), 'containers.Map')
-                    fprintf('    Cache validation failed: %s is not a containers.Map\n', mapName);
-                    return;
-                elseif isempty(roiCache.(mapName))
-                    fprintf('    Cache validation failed: %s is empty\n', mapName);
-                    return;
-                end
-            end
-            
-            % Verify that filtering statistics contain data for at least some ROIs
-            numROIsWithNoise = length(roiCache.noiseMap);
-            numROIsWithThresholds = length(roiCache.standardDeviations);
-            
-            if numROIsWithNoise == 0 || numROIsWithThresholds == 0
-                fprintf('    Cache validation failed: no ROIs have complete filtering data\n');
-                return;
-            end
-            
-            % QUALITY CHECK: Verify that the ROI numbers in the cache match the filtering data
-            roiKeysInNoise = cell2mat(keys(roiCache.noiseMap));
-            if isempty(roiKeysInNoise)
-                fprintf('    Cache validation failed: noise map has no numeric keys\n');
-                return;
-            end
-            
-            % Check that we have overlap between cache ROIs and filtering data
-            commonROIs = intersect(roiCache.numbers, roiKeysInNoise);
-            if isempty(commonROIs)
-                fprintf('    Cache validation failed: no ROIs overlap between cache and filtering data\n');
-                return;
-            end
-        end
-        
-        isValid = true;
-        
-    catch ME
-        fprintf('    Cache validation error: %s\n', ME.message);
-        isValid = false;
     end
 end
 
 function tasks = createPlotTasks(organizedData, averagedData, roiInfo, roiCache, groupKey, outputFolders, config)
-    % Create plotting tasks based on experiment type and configuration
+    % Create plotting tasks with enhanced validation
     
     tasks = {};
     
@@ -341,57 +122,57 @@ function tasks = createPlotTasks(organizedData, averagedData, roiInfo, roiCache,
     else
         tasks = create1APTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config, roiCache);
     end
+    
+    % Validate all tasks have valid cache
+    tasks = validateTasksWithCache(tasks, config);
 end
 
 function tasks = create1APTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config, roiCache)
-    % Create 1AP plotting tasks with FIXED validation
+    % Create 1AP plotting tasks with enhanced validation and cache integration
     
     tasks = {};
     
-    % Individual trials - FIXED: Validate data exists
+    % Individual trials - ENHANCED validation
     if config.plotting.ENABLE_INDIVIDUAL_TRIALS && istable(organizedData) && width(organizedData) > 1
-        tasks{end+1} = struct('type', 'trials', 'experimentType', '1AP', ...
-                             'data', organizedData, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
-                             'groupKey', groupKey, 'outputFolder', outputFolders.roi_trials);
+        % Verify we have ROIs in the cache that match the data
+        cache_manager = roi_cache();
+        cacheROIs = cache_manager.getROINumbers(roiCache);
+        
+        if ~isempty(cacheROIs)
+            tasks{end+1} = struct('type', 'trials', 'experimentType', '1AP', ...
+                                 'data', organizedData, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
+                                 'groupKey', groupKey, 'outputFolder', outputFolders.roi_trials, ...
+                                 'expectedROIs', length(cacheROIs));
+        elseif config.debug.ENABLE_PLOT_DEBUG
+            fprintf('    Skipping trials plot: no ROIs in cache\n');
+        end
     end
     
-    % ROI averages - FIXED: Better validation and debugging
+    % ROI averages - ENHANCED validation
     if config.plotting.ENABLE_ROI_AVERAGES
         if isfield(averagedData, 'roi') && istable(averagedData.roi) && width(averagedData.roi) > 1
             tasks{end+1} = struct('type', 'averages', 'experimentType', '1AP', ...
                                  'data', averagedData.roi, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
                                  'groupKey', groupKey, 'outputFolder', outputFolders.roi_averages);
         elseif config.debug.ENABLE_PLOT_DEBUG
-            if ~isfield(averagedData, 'roi')
-                fprintf('    ROI averages: averagedData.roi field missing\n');
-            elseif ~istable(averagedData.roi)
-                fprintf('    ROI averages: averagedData.roi not a table\n');
-            elseif width(averagedData.roi) <= 1
-                fprintf('    ROI averages: averagedData.roi has %d columns (need >1)\n', width(averagedData.roi));
-            end
+            fprintf('    Skipping ROI averages: %s\n', diagnoseAveragedData(averagedData, 'roi'));
         end
     end
     
-    % Coverslip averages - FIXED: Better validation
+    % Coverslip averages - ENHANCED validation
     if config.plotting.ENABLE_COVERSLIP_AVERAGES
         if isfield(averagedData, 'total') && istable(averagedData.total) && width(averagedData.total) > 1
             tasks{end+1} = struct('type', 'coverslip', 'experimentType', '1AP', ...
                                  'data', averagedData.total, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
                                  'groupKey', groupKey, 'outputFolder', outputFolders.coverslip_averages);
         elseif config.debug.ENABLE_PLOT_DEBUG
-            if ~isfield(averagedData, 'total')
-                fprintf('    Coverslip averages: averagedData.total field missing\n');
-            elseif ~istable(averagedData.total)
-                fprintf('    Coverslip averages: averagedData.total not a table\n');
-            elseif width(averagedData.total) <= 1
-                fprintf('    Coverslip averages: averagedData.total has %d columns (need >1)\n', width(averagedData.total));
-            end
+            fprintf('    Skipping coverslip averages: %s\n', diagnoseAveragedData(averagedData, 'total'));
         end
     end
 end
 
 function tasks = createPPFTasks(organizedData, averagedData, roiInfo, groupKey, outputFolders, config, roiCache)
-    % Create PPF plotting tasks (unchanged from original)
+    % Create PPF plotting tasks (enhanced but similar structure)
     
     tasks = {};
     
@@ -404,42 +185,183 @@ function tasks = createPPFTasks(organizedData, averagedData, roiInfo, groupKey, 
     
     % Averaged plots
     if config.plotting.ENABLE_PPF_AVERAGED && isstruct(averagedData)
-        if isfield(averagedData, 'allData') && width(averagedData.allData) > 1
-            tasks{end+1} = struct('type', 'averaged', 'experimentType', 'PPF', ...
-                                 'data', averagedData.allData, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
-                                 'groupKey', groupKey, 'outputFolder', outputFolders.coverslip_averages, ...
-                                 'plotSubtype', 'AllData');
-        end
+        ppfSubtypes = {'allData', 'bothPeaks', 'singlePeak'};
+        ppfSheetNames = {'AllData', 'BothPeaks', 'SinglePeak'};
         
-        if isfield(averagedData, 'bothPeaks') && width(averagedData.bothPeaks) > 1
-            tasks{end+1} = struct('type', 'averaged', 'experimentType', 'PPF', ...
-                                 'data', averagedData.bothPeaks, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
-                                 'groupKey', groupKey, 'outputFolder', outputFolders.coverslip_averages, ...
-                                 'plotSubtype', 'BothPeaks');
-        end
-        
-        if isfield(averagedData, 'singlePeak') && width(averagedData.singlePeak) > 1
-            tasks{end+1} = struct('type', 'averaged', 'experimentType', 'PPF', ...
-                                 'data', averagedData.singlePeak, 'roiInfo', roiInfo, 'roiCache', roiCache, ...
-                                 'groupKey', groupKey, 'outputFolder', outputFolders.coverslip_averages, ...
-                                 'plotSubtype', 'SinglePeak');
+        for i = 1:length(ppfSubtypes)
+            subtype = ppfSubtypes{i};
+            if isfield(averagedData, subtype) && width(averagedData.(subtype)) > 1
+                tasks{end+1} = struct('type', 'averaged', 'experimentType', 'PPF', ...
+                                     'data', averagedData.(subtype), 'roiInfo', roiInfo, 'roiCache', roiCache, ...
+                                     'groupKey', groupKey, 'outputFolder', outputFolders.coverslip_averages, ...
+                                     'plotSubtype', ppfSheetNames{i});
+            end
         end
     end
 end
 
-% REMAINING FUNCTIONS UNCHANGED - just reference by name:
-% - shouldUseParallel
-% - executePlotTasksParallel  
-% - executePlotTasksSequential
-% - executeSinglePlotTask
-% - hasValidPlotData
-% - hasValidPPFData
-% - getPrimaryPPFData
-% - setupPlotEnvironment
-% - cleanupPlotEnvironment
+function validTasks = validateTasksWithCache(tasks, config)
+    % Validate that all tasks have proper cache data
+    
+    validTasks = {};
+    
+    for i = 1:length(tasks)
+        task = tasks{i};
+        
+        % Validate cache exists and is valid
+        if isfield(task, 'roiCache') && ~isempty(task.roiCache) && task.roiCache.valid
+            % For 1AP trials, verify we have matching ROIs
+            if strcmp(task.experimentType, '1AP') && strcmp(task.type, 'trials')
+                if isfield(task, 'expectedROIs') && task.expectedROIs > 0
+                    validTasks{end+1} = task;
+                elseif config.debug.ENABLE_PLOT_DEBUG
+                    fprintf('    Task %d: No ROIs expected, skipping\n', i);
+                end
+            else
+                validTasks{end+1} = task;
+            end
+        elseif config.debug.ENABLE_PLOT_DEBUG
+            fprintf('    Task %d: Invalid cache, skipping (%s)\n', i, task.type);
+        end
+    end
+    
+    if config.debug.ENABLE_PLOT_DEBUG
+        fprintf('    Validated %d/%d tasks\n', length(validTasks), length(tasks));
+    end
+end
+
+function plotsGenerated = executePlotTasks(tasks, config)
+    % Enhanced task execution with better error handling
+    
+    if shouldUseParallel(tasks, config)
+        plotsGenerated = executePlotTasksParallel(tasks, config);
+    else
+        plotsGenerated = executePlotTasksSequential(tasks, config);
+    end
+end
+
+function plotsGenerated = executePlotTasksParallel(tasks, config)
+    % Parallel execution with enhanced error handling
+    
+    pool = gcp('nocreate');
+    if isempty(pool)
+        plotsGenerated = executePlotTasksSequential(tasks, config);
+        return;
+    end
+    
+    try
+        futures = cell(length(tasks), 1);
+        for i = 1:length(tasks)
+            futures{i} = parfeval(pool, @executeSinglePlotTaskSafe, 1, tasks{i}, config);
+        end
+        
+        plotsGenerated = 0;
+        for i = 1:length(futures)
+            try
+                success = fetchOutputs(futures{i});
+                if success
+                    plotsGenerated = plotsGenerated + 1;
+                end
+            catch ME
+                if config.debug.ENABLE_PLOT_DEBUG
+                    fprintf('    Parallel task %d failed: %s\n', i, ME.message);
+                end
+            end
+        end
+        
+    catch ME
+        if config.debug.ENABLE_PLOT_DEBUG
+            fprintf('    Parallel execution failed, falling back to sequential: %s\n', ME.message);
+        end
+        plotsGenerated = executePlotTasksSequential(tasks, config);
+    end
+end
+
+function plotsGenerated = executePlotTasksSequential(tasks, config)
+    % Sequential execution with enhanced error handling
+    
+    plotsGenerated = 0;
+    
+    for i = 1:length(tasks)
+        try
+            success = executeSinglePlotTaskSafe(tasks{i}, config);
+            if success
+                plotsGenerated = plotsGenerated + 1;
+            end
+        catch ME
+            if config.debug.ENABLE_PLOT_DEBUG
+                fprintf('    Sequential task %d failed: %s\n', i, ME.message);
+            end
+        end
+    end
+end
+
+function success = executeSinglePlotTaskSafe(task, config)
+    % Safe wrapper for single plot task execution
+    
+    success = false;
+    
+    try
+        % Validate task before execution
+        if ~isfield(task, 'experimentType') || ~isfield(task, 'type') || ~isfield(task, 'roiCache')
+            if config.debug.ENABLE_PLOT_DEBUG
+                fprintf('    Invalid task structure\n');
+            end
+            return;
+        end
+        
+        % Execute based on experiment type
+        if strcmp(task.experimentType, '1AP')
+            plot1AP = plot_1ap();
+            success = plot1AP.execute(task, config);
+        elseif strcmp(task.experimentType, 'PPF')
+            plotPPF = plot_ppf();
+            success = plotPPF.execute(task, config);
+        else
+            if config.debug.ENABLE_PLOT_DEBUG
+                fprintf('    Unknown experiment type: %s\n', task.experimentType);
+            end
+        end
+        
+    catch ME
+        if config.debug.ENABLE_PLOT_DEBUG
+            fprintf('    Plot task execution failed: %s\n', ME.message);
+            if ~isempty(ME.stack)
+                fprintf('    Stack: %s (line %d)\n', ME.stack(1).name, ME.stack(1).line);
+            end
+        end
+        success = false;
+    end
+end
+
+function isValid = validateROICache(roiCache, roiInfo)
+    % DELEGATES to ROI cache module for validation
+    
+    cache_manager = roi_cache();
+    isValid = cache_manager.validate(roiCache);
+end
+
+function diagMsg = diagnoseAveragedData(averagedData, fieldName)
+    % Diagnostic helper for averaged data issues
+    
+    if ~isfield(averagedData, fieldName)
+        diagMsg = sprintf('%s field missing', fieldName);
+    elseif ~istable(averagedData.(fieldName))
+        diagMsg = sprintf('%s not a table', fieldName);
+    elseif width(averagedData.(fieldName)) <= 1
+        diagMsg = sprintf('%s has %d columns (need >1)', fieldName, width(averagedData.(fieldName)));
+    else
+        diagMsg = 'unknown issue';
+    end
+end
+
+% ========================================================================
+% HELPER FUNCTIONS (mostly unchanged)
+% ========================================================================
 
 function useParallel = shouldUseParallel(tasks, config)
-    % Unchanged from original
+    % Determine if parallel execution is beneficial
+    
     useParallel = false;
     if ~config.plotting.ENABLE_PARALLEL
         return;
@@ -454,80 +376,9 @@ function useParallel = shouldUseParallel(tasks, config)
     useParallel = true;
 end
 
-function plotsGenerated = executePlotTasksParallel(tasks)
-    % Unchanged from original
-    pool = gcp('nocreate');
-    if isempty(pool)
-        plotsGenerated = executePlotTasksSequential(tasks);
-        return;
-    end
-    
-    try
-        futures = cell(length(tasks), 1);
-        for i = 1:length(tasks)
-            futures{i} = parfeval(pool, @executeSinglePlotTask, 1, tasks{i});
-        end
-        
-        plotsGenerated = 0;
-        for i = 1:length(futures)
-            try
-                success = fetchOutputs(futures{i});
-                if success
-                    plotsGenerated = plotsGenerated + 1;
-                end
-            catch ME
-                if GluSnFRConfig().debug.ENABLE_PLOT_DEBUG
-                    fprintf('    Task %d failed (parallel): %s\n', i, ME.message);
-                end
-            end
-        end
-        
-    catch
-        plotsGenerated = executePlotTasksSequential(tasks);
-    end
-end
-
-function plotsGenerated = executePlotTasksSequential(tasks)
-    % Unchanged from original
-    plotsGenerated = 0;
-    
-    for i = 1:length(tasks)
-        try
-            success = executeSinglePlotTask(tasks{i});
-            if success
-                plotsGenerated = plotsGenerated + 1;
-            end
-        catch ME
-            if GluSnFRConfig().debug.ENABLE_PLOT_DEBUG
-                fprintf('    Plot task %d failed: %s\n', i, ME.message);
-            end
-        end
-    end
-end
-
-function success = executeSinglePlotTask(task)
-    % Execute a single plotting task - FIXED to remove legacy fallbacks
-    success = false;
-    config = GluSnFRConfig();
-    
-    try
-        if strcmp(task.experimentType, '1AP')
-            plot1AP = plot_1ap();
-            success = plot1AP.execute(task, config);
-        elseif strcmp(task.experimentType, 'PPF')
-            plotPPF = plot_ppf();
-            success = plotPPF.execute(task, config);
-        end
-    catch ME
-        if config.debug.ENABLE_PLOT_DEBUG
-            fprintf('    Plot task failed: %s\n', ME.message);
-        end
-        success = false;
-    end
-end
-
 function hasData = hasValidPlotData(organizedData, roiInfo, config)
-    % Unchanged from original
+    % Quick validation of plot data availability
+    
     if strcmp(roiInfo.experimentType, 'PPF')
         hasData = isstruct(organizedData) && ...
                   ((isfield(organizedData, 'allData') && width(organizedData.allData) > 1) || ...
@@ -539,7 +390,8 @@ function hasData = hasValidPlotData(organizedData, roiInfo, config)
 end
 
 function hasData = hasValidPPFData(organizedData)
-    % Unchanged from original
+    % Check for valid PPF data
+    
     hasData = isstruct(organizedData) && ...
               ((isfield(organizedData, 'allData') && width(organizedData.allData) > 1) || ...
                (isfield(organizedData, 'bothPeaks') && width(organizedData.bothPeaks) > 1) || ...
@@ -547,7 +399,8 @@ function hasData = hasValidPPFData(organizedData)
 end
 
 function plotData = getPrimaryPPFData(organizedData)
-    % Unchanged from original
+    % Get primary PPF data table
+    
     plotData = [];
     if isfield(organizedData, 'allData') && width(organizedData.allData) > 1
         plotData = organizedData.allData;
@@ -559,14 +412,16 @@ function plotData = getPrimaryPPFData(organizedData)
 end
 
 function setupPlotEnvironment()
-    % Unchanged from original
+    % Setup plotting environment
+    
     set(groot, 'DefaultFigureVisible', 'off');
     set(groot, 'DefaultFigureRenderer', 'painters');
     set(groot, 'DefaultFigureColor', 'white');
 end
 
 function cleanupPlotEnvironment()
-    % Unchanged from original
+    % Cleanup plotting environment
+    
     close all;
     drawnow;
     set(groot, 'DefaultFigureVisible', 'on');
